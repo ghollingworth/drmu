@@ -149,7 +149,12 @@ typedef struct drmu_atomic_q_s {
 typedef struct drmu_env_s {
     int fd;
     uint32_t plane_count;
+    uint32_t conn_count;
+    uint32_t crtc_count;
     drmu_plane_t * planes;
+    drmu_conn_t * conns;
+    drmu_crtc_t * crtcs;
+
     drmModeResPtr res;
 
     drmu_log_env_t log;

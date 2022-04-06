@@ -41,8 +41,7 @@ int main(int argc, char *argv[])
             .v = NULL,
             .max_level = DRMU_LOG_LEVEL_ALL
         };
-        if ((du = drmu_env_new_xlease(&log)) == NULL &&
-            (du = drmu_env_new_open(DRM_MODULE, &log)) == NULL)
+        if ((du = drmu_env_new_open(DRM_MODULE, &log)) == NULL)
             goto fail;
     }
 
@@ -72,4 +71,5 @@ fail:
     drmu_env_delete(&du);
     return 0;
 }
+
 

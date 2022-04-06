@@ -11,7 +11,7 @@ threads_dep = dependency('threads')
 libdrm_dep = dependency('libdrm')
 
 drmu_base = library('drmu_base',
-	'drmu.c', 'drmu_atomic.c', 'pollqueue.c', 'drmu_util.c',
+	'drmu_output.c', 'drmu.c', 'drmu_atomic.c', 'pollqueue.c', 'drmu_util.c',
 	dependencies : [
 		threads_dep,
 		libdrm_dep
@@ -77,6 +77,16 @@ executable(
 	'10bittest',
 	'10bittest.c', 'plane16.c',
 	link_with : [ drmu_base, drmu_xlease ],
+	dependencies : [
+		threads_dep,
+		libdrm_dep,
+	],
+)
+
+executable(
+	'wbtest',
+	'wbtest.c',
+	link_with : [ drmu_base ],
 	dependencies : [
 		threads_dep,
 		libdrm_dep,

@@ -10,8 +10,7 @@ typedef struct aprop_prop_s {
     uint32_t id;
     uint64_t value;
     void * v;
-    drmu_prop_ref_fn ref_fn;
-    drmu_prop_del_fn del_fn;
+    const drmu_atomic_prop_fns_t * fns;
 } aprop_prop_t;
 
 typedef struct aprop_obj_s {
@@ -46,15 +45,13 @@ max_uint(const unsigned int a, const unsigned int b)
 static void
 aprop_prop_unref(aprop_prop_t * const pp)
 {
-    if (pp->del_fn)
-        pp->del_fn(pp->v);
+    pp->fns->unref(pp->v);
 }
 
 static void
 aprop_prop_ref(aprop_prop_t * const pp)
 {
-    if (pp->ref_fn)
-        pp->ref_fn(pp->v);
+    pp->fns->ref(pp->v);
 }
 
 static void
@@ -523,12 +520,36 @@ aprop_hdr_atomic_fill(const aprop_hdr_t * const ph,
     }
 }
 
+void
+drmu_prop_fn_null_unref(void * v)
+{
+    (void)v;
+}
+
+void
+drmu_prop_fn_null_ref(void * v)
+{
+    (void)v;
+}
+
+void
+drmu_prop_fn_null_commit(void * v, uint64_t value)
+{
+    (void)v;
+    (void)value;
+}
+
 int
 drmu_atomic_add_prop_generic(drmu_atomic_t * const da,
                   const uint32_t obj_id, const uint32_t prop_id, const uint64_t value,
-                  const drmu_prop_ref_fn ref_fn, const drmu_prop_del_fn del_fn, void * const v)
+                  const drmu_atomic_prop_fns_t * const fns, void * const v)
 {
     aprop_hdr_t * const ph = &da->props;
+    static const drmu_atomic_prop_fns_t null_fns = {
+        .ref    = drmu_prop_fn_null_ref,
+        .unref  = drmu_prop_fn_null_unref,
+        .commit = drmu_prop_fn_null_commit
+    };
 
     if (obj_id == 0 || prop_id == 0)
     {
@@ -542,8 +563,7 @@ drmu_atomic_add_prop_generic(drmu_atomic_t * const da,
 
         aprop_prop_unref(pp);
         pp->value = value;
-        pp->ref_fn = ref_fn;
-        pp->del_fn = del_fn;
+        pp->fns = !fns ? &null_fns : fns;
         pp->v = v;
         aprop_prop_ref(pp);
         return 0;
@@ -553,7 +573,7 @@ drmu_atomic_add_prop_generic(drmu_atomic_t * const da,
 int
 drmu_atomic_add_prop_value(drmu_atomic_t * const da, const uint32_t obj_id, const uint32_t prop_id, const uint64_t value)
 {
-    if (drmu_atomic_add_prop_generic(da, obj_id, prop_id, value, 0, 0, NULL) < 0)
+    if (drmu_atomic_add_prop_generic(da, obj_id, prop_id, value, NULL, NULL) < 0)
         drmu_warn(drmu_atomic_env(da), "%s: Failed to set obj_id=%#x, prop_id=%#x, val=%" PRId64, __func__,
                  obj_id, prop_id, value);
     return 0;
@@ -785,7 +805,7 @@ drmu_atomic_commit_test(const drmu_atomic_t * const da, uint32_t flags, drmu_ato
             atomic_props_del(&atomic, a, n_props, &objid, &propid, &val);
             --n_props;
 
-            drmu_atomic_add_prop_generic(da_fail, objid, propid, val, 0, 0, NULL);
+            drmu_atomic_add_prop_value(da_fail, objid, propid, val);
         }
     }
 

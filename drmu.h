@@ -33,6 +33,9 @@ typedef struct drmu_pool_s drmu_pool_t;
 struct drmu_crtc_s;
 typedef struct drmu_crtc_s drmu_crtc_t;
 
+struct drmu_conn_s;
+typedef struct drmu_conn_s drmu_conn_t;
+
 struct drmu_plane_s;
 typedef struct drmu_plane_s drmu_plane_t;
 
@@ -259,18 +262,12 @@ uint32_t drmu_crtc_height(const drmu_crtc_t * const dc);
 drmu_ufrac_t drmu_crtc_sar(const drmu_crtc_t * const dc);
 void drmu_crtc_max_bpc_allow(drmu_crtc_t * const dc, const bool max_bpc_allowed);
 
-typedef int drmu_mode_score_fn(void * v, const struct _drmModeModeInfo * mode);
-int drmu_crtc_mode_pick(drmu_crtc_t * const dc, drmu_mode_score_fn * const score_fn, void * const score_v);
-
-// Simple mode picker cb - looks for width / height and then refresh
-// If nothing "plausible" defaults to EDID preferred mode
 typedef struct drmu_mode_pick_simple_params_s {
     unsigned int width;
     unsigned int height;
     unsigned int hz_x_1000;  // Refresh rate * 1000 i.e. 50Hz = 50000
     uint32_t flags;          // Nothing currently - but things like interlace could turn up here
 } drmu_mode_pick_simple_params_t;
-drmu_mode_score_fn drmu_mode_pick_simple_cb;
 
 // Get simple properties of a mode_id
 // If mode_id == -1 retrieves params for current mode
@@ -296,6 +293,22 @@ int drmu_atomic_crtc_hdr_metadata_set(struct drmu_atomic_s * const da, drmu_crtc
 // (e.g. hdr_metadata, colorspace) but do not set the mode (resolution
 // and refresh)
 int drmu_atomic_crtc_fb_info_set(struct drmu_atomic_s * const da, drmu_crtc_t * const dc, const drmu_fb_t * const fb);
+
+// Connector
+
+// Beware: this refects initial value or the last thing set, but currently
+// has no way of guessing if the atomic from the set was ever committed
+// successfully
+uint32_t drmu_conn_crtc_id_get(const drmu_conn_t * const dn);
+
+bool drmu_conn_is_output(const drmu_conn_t * const dn);
+bool drmu_conn_is_writeback(const drmu_conn_t * const dn);
+const char * drmu_conn_name(const drmu_conn_t * const dn);
+unsigned int drmu_conn_idx_get(const drmu_conn_t * const dn);
+
+// Retrieve the the n-th conn. Use for iteration. Returns NULL when none left
+drmu_conn_t * drmu_conn_find_n(drmu_env_t * const du, const unsigned int n);
+
 
 // Plane
 
@@ -425,12 +438,23 @@ int drmu_atomic_commit(const drmu_atomic_t * const da, uint32_t flags);
 // This does NOT remove failing props from da.  If da_fail == NULL then same as _commit
 int drmu_atomic_commit_test(const drmu_atomic_t * const da, uint32_t flags, drmu_atomic_t * const da_fail);
 
-typedef void (* drmu_prop_del_fn)(void * v);
-typedef void (* drmu_prop_ref_fn)(void * v);
+typedef void drmu_prop_unref_fn(void * v);
+typedef void drmu_prop_ref_fn(void * v);
+typedef void drmu_prop_commit_fn(void * v, uint64_t value);
+
+typedef struct drmu_atomic_prop_fns_s {
+    drmu_prop_ref_fn * ref;
+    drmu_prop_unref_fn * unref;
+    drmu_prop_commit_fn * commit;
+} drmu_atomic_prop_fns_t;
+
+drmu_prop_ref_fn drmu_prop_fn_null_unref;
+drmu_prop_unref_fn drmu_prop_fn_null_ref;
+drmu_prop_commit_fn drmu_prop_fn_null_commit;
 
 int drmu_atomic_add_prop_generic(drmu_atomic_t * const da,
         const uint32_t obj_id, const uint32_t prop_id, const uint64_t value,
-        const drmu_prop_ref_fn ref_fn, const drmu_prop_del_fn del_fn, void * const v);
+        const drmu_atomic_prop_fns_t * const fns, void * const v);
 int drmu_atomic_add_prop_value(drmu_atomic_t * const da, const uint32_t obj_id, const uint32_t prop_id, const uint64_t value);
 
 // drmu_xlease

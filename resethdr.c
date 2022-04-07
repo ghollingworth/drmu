@@ -4,6 +4,7 @@
 #include <memory.h>
 
 #include "drmu.h"
+#include "drmu_output.h"
 #include "drmu_log.h"
 #include <drm_fourcc.h>
 
@@ -26,6 +27,7 @@ drmu_log_stderr_cb(void * v, enum drmu_log_level_e level, const char * fmt, va_l
 int main(int argc, char *argv[])
 {
     drmu_env_t * du = NULL;
+    drmu_output_t * dout = NULL;
     drmu_crtc_t * dc = NULL;
     drmu_atomic_t * da = NULL;
     int rv;
@@ -48,8 +50,11 @@ int main(int argc, char *argv[])
 
     drmu_env_modeset_allow(du, true);
 
-    if ((dc = drmu_crtc_new_find(du)) == NULL)
+    if ((dout = drmu_output_new(du)) == NULL)
         goto fail;
+    if (drmu_output_add_output(dout, NULL) != 0)
+        goto fail;
+    dc = drmu_output_crtc(dout);
 
     if ((da = drmu_atomic_new(du)) == NULL)
         goto fail;
@@ -68,7 +73,7 @@ int main(int argc, char *argv[])
 
 fail:
     drmu_atomic_unref(&da);
-    drmu_crtc_delete(&dc);
+    drmu_output_unref(&dout);
     drmu_env_delete(&du);
     return 0;
 }

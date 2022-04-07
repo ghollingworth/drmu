@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <limits.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -872,6 +873,16 @@ drmu_bo_env_init(drmu_bo_env_t * boe)
 
 //----------------------------------------------------------------------------
 //
+// Format info fns
+
+unsigned int
+drmu_format_info_bit_depth(const drmu_format_info_t * const fmt_info)
+{
+    return !fmt_info ? 0 : fmt_info->bit_depth;
+}
+
+//----------------------------------------------------------------------------
+//
 // FB fns
 
 void
@@ -1109,10 +1120,10 @@ drmu_fb_hdr_metadata_set(drmu_fb_t *const dfb, const struct hdr_output_metadata 
     }
 }
 
-bool
+drmu_isset_t
 drmu_fb_hdr_metadata_isset(const drmu_fb_t *const dfb)
 {
-    return dfb->hdr_metadata_isset != DRMU_ISSET_UNSET;
+    return dfb->hdr_metadata_isset;
 }
 
 const struct hdr_output_metadata *
@@ -1747,6 +1758,7 @@ crtc_mode_set_vars(drmu_crtc_t * const dc)
     }
 }
 
+#if 0
 static int
 atomic_crtc_bpc_set(drmu_atomic_t * const da, drmu_crtc_t * const dc,
                     const char * const colorspace,
@@ -1766,11 +1778,13 @@ atomic_crtc_bpc_set(drmu_atomic_t * const da, drmu_crtc_t * const dc,
     return 0;
 }
 
+
 static int
 atomic_crtc_hi_bpc_set(drmu_atomic_t * const da, drmu_crtc_t * const dc)
 {
     return atomic_crtc_bpc_set(da, dc, "BT2020_YCC", 12);
 }
+#endif
 
 void
 drmu_crtc_delete(drmu_crtc_t ** ppdc)
@@ -1855,6 +1869,7 @@ crtc_init(drmu_env_t * const du, drmu_crtc_t * const dc, const uint32_t crtc_id)
     return 0;
 }
 
+#if 0
 static drmu_crtc_t *
 crtc_from_con_id(drmu_env_t * const du, const uint32_t con_id)
 {
@@ -1972,33 +1987,37 @@ fail:
     free_crtc(dc);
     return NULL;
 }
+#endif
 
 drmu_crtc_t *
 drmu_crtc_find_id(drmu_env_t * const du, const uint32_t crtc_id)
 {
     unsigned int i;
     for (i = 0; i != du->crtc_count; ++i) {
-        drmu_crtc_t * const du->crtcs + i;
+        drmu_crtc_t * const dc = du->crtcs + i;
         if (dc->crtc.crtc_id == crtc_id)
             return dc;
     }
     return NULL;
 }
 
-drmu_mode_pick_simple_params_t
+drmu_mode_simple_params_t
 drmu_crtc_mode_simple_params(const drmu_crtc_t * const dc, const int mode_id)
 {
-    drmu_mode_pick_simple_params_t params = { 0 };
-
-    if (mode_id >= -1 && mode_id < dc->con->count_modes) {
+    if (mode_id < -1 || mode_id >= dc->con->count_modes)
+        return (drmu_mode_simple_params_t){ 0 };
+    else {
         const struct drm_mode_modeinfo * const mode = mode_id == -1 ?
             &dc->crtc.mode :
             (const struct drm_mode_modeinfo *)(dc->con->modes + mode_id);
-        params.width = mode->hdisplay;
-        params.height = mode->vdisplay;
-        params.hz_x_1000 = (uint32_t)(((uint64_t)mode->clock * 1000000) / (mode->htotal * mode->vtotal));
+        return (drmu_mode_simple_params_t){
+            .width = mode->hdisplay,
+            .height = mode->vdisplay,
+            .hz_x_1000 = (uint32_t)(((uint64_t)mode->clock * 1000000) / (mode->htotal * mode->vtotal)),
+            .type = mode->type,
+            .flags = mode->flags,
+        };
     }
-    return params;
 }
 
 // Get a CRTC attached (via encoder) to a connector
@@ -2171,29 +2190,6 @@ drmu_atomic_crtc_broadcast_rgb_set(drmu_atomic_t * const da, drmu_crtc_t * const
     return drmu_atomic_add_prop_enum(da, dc->con->connector_id, dc->pid.broadcast_rgb, bcrgb);
 }
 
-// Set all the fb info props that might apply to a crtc on the crtc
-// (e.g. hdr_metadata, colorspace) but do not set the mode (resolution
-// and refresh)
-int
-drmu_atomic_crtc_fb_info_set(drmu_atomic_t * const da, drmu_crtc_t * const dc, const drmu_fb_t * const fb)
-{
-    const drmu_format_info_t * const fmt_info = drmu_fb_format_info_get(fb);
-    const char * const colorspace = drmu_fb_colorspace_get(fb);
-    const char * const color_range = drmu_fb_color_range_get(fb);
-    int rv = 0;
-
-    if (fmt_info)
-        rv = rvup(rv, drmu_atomic_crtc_hi_bpc_set(da, dc, (fmt_info->bit_depth > 8)));
-    if (colorspace)
-        rv = rvup(rv, drmu_atomic_crtc_colorspace_set(da, dc, colorspace));
-    if (color_range)
-        rv = rvup(rv, drmu_atomic_crtc_broadcast_rgb_set(da, dc,
-            drmu_color_range_to_broadcast_rgb(color_range)));
-    if (drmu_fb_hdr_metadata_isset(fb))
-        rv = rvup(rv, drmu_atomic_crtc_hdr_metadata_set(da, dc, drmu_fb_hdr_metadata_get(fb)));
-    return rv;
-}
-
 //----------------------------------------------------------------------------
 //
 // CONN functions
@@ -2219,7 +2215,9 @@ static const char * conn_type_names[32] = {
     [DRM_MODE_CONNECTOR_DPI]         = "DPI",
     [DRM_MODE_CONNECTOR_WRITEBACK]   = "WRITEBACK",
     [DRM_MODE_CONNECTOR_SPI]         = "SPI",
+#ifdef DRM_MODE_CONNECTOR_USB
     [DRM_MODE_CONNECTOR_USB]         = "USB",
+#endif
 };
 
 struct drmu_conn_s {
@@ -2257,7 +2255,7 @@ drmu_conn_is_writeback(const drmu_conn_t * const dn)
 const char *
 drmu_conn_name(const drmu_conn_t * const dn)
 {
-    return name;
+    return dn->name;
 }
 
 uint32_t

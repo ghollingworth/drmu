@@ -51,7 +51,7 @@ typedef struct drmprime_out_env_s
     drmu_atomic_t * display_set;
 
     int mode_id;
-    drmu_mode_pick_simple_params_t picked;
+    drmu_mode_simple_params_t picked;
 } drmprime_out_env_t;
 
 int drmprime_out_display(drmprime_out_env_t *de, struct AVFrame *src_frame)
@@ -83,7 +83,9 @@ int drmprime_out_display(drmprime_out_env_t *de, struct AVFrame *src_frame)
     {
         drmu_atomic_t * da = drmu_atomic_new(de->du);
         drmu_fb_t * dfb = drmu_fb_av_new_frame_attach(de->du, src_frame);
-        drmu_rect_t r = drmu_rect_wh(drmu_crtc_width(de->dc), drmu_crtc_height(de->dc));
+        const drmu_mode_simple_params_t *const sp = drmu_output_mode_simple_params(de->dout);
+        drmu_rect_t r = drmu_rect_wh(sp->width, sp->height);
+        drmu_output_fb_info_set(de->dout, dfb);
 #if 0
         const struct hdr_output_metadata * const meta = drmu_fb_hdr_metadata_get(dfb);
         const struct hdr_metadata_infoframe *const info = &meta->hdmi_metadata_type1;
@@ -102,7 +104,7 @@ int drmprime_out_display(drmprime_out_env_t *de, struct AVFrame *src_frame)
                    info->max_fall);
         }
 #endif
-        drmu_atomic_crtc_fb_info_set(da, de->dc, dfb);
+        drmu_atomic_add_output_props(da, de->dout);
         drmu_atomic_plane_fb_set(da, de->dp, dfb, r);
         drmu_fb_unref(&dfb);
         drmu_atomic_queue(&da);
@@ -115,7 +117,7 @@ int drmprime_out_display(drmprime_out_env_t *de, struct AVFrame *src_frame)
 
 int drmprime_out_modeset(drmprime_out_env_t * de, int w, int h, const AVRational rate)
 {
-    drmu_mode_pick_simple_params_t pick = {
+    drmu_mode_simple_params_t pick = {
         .width = w,
         .height = h,
         .hz_x_1000 = rate.den <= 0 ? 0 : rate.num * 1000 / rate.den
@@ -130,13 +132,15 @@ int drmprime_out_modeset(drmprime_out_env_t * de, int w, int h, const AVRational
 
     drmu_env_modeset_allow(de->du, true);
 
-    de->mode_id = drmu_output_mode_pick(de->dout, drmu_mode_pick_simple_cb, &pick);
+    de->mode_id = drmu_output_mode_pick_simple(de->dout, drmu_mode_pick_simple_cb, &pick);
 
     // This will set the mode on the crtc var but won't actually change the output
     if (de->mode_id >= 0) {
+        const drmu_mode_simple_params_t * sp;
         drmu_output_mode_id_set(de->dout, de->mode_id);
+        sp = drmu_output_mode_simple_params(de->dout);
         fprintf(stderr, "Req %dx%d Hz %d.%03d got %dx%d\n", pick.width, pick.height, pick.hz_x_1000 / 1000, pick.hz_x_1000%1000,
-                drmu_output_width(de->dout), drmu_output_height(de->dout));
+                sp->width, sp->height);
     }
     else {
         fprintf(stderr, "Req %dx%d Hz %d.%03d got nothing\n", pick.width, pick.height, pick.hz_x_1000 / 1000, pick.hz_x_1000%1000);
@@ -150,7 +154,7 @@ int drmprime_out_modeset(drmprime_out_env_t * de, int w, int h, const AVRational
 void drmprime_out_delete(drmprime_out_env_t *de)
 {
     drmu_plane_delete(&de->dp);
-    drmu_output_delete(&de->dout);
+    drmu_output_unref(&de->dout);
     drmu_env_delete(&de->du);
     free(de);
 }
@@ -195,14 +199,14 @@ drmprime_out_env_t* drmprime_out_new()
     if (drmu_output_add_output(de->dout, NULL) != 0)
         goto fail;
 
-    drmu_output_max_bpc_allow(de->dc, true);
+    drmu_output_max_bpc_allow(de->dout, true);
 
     if ((de->pic_pool = drmu_pool_new(de->du, 5)) == NULL)
         goto fail;
 
     // **** Plane selection needs noticable improvement
     // This wants to be the primary
-    if ((de->dp = drmu_plane_new_find(de->dc, DRM_FORMAT_NV12)) == NULL)
+    if ((de->dp = drmu_plane_new_find(drmu_output_crtc(de->dout), DRM_FORMAT_NV12)) == NULL)
         goto fail;
 
     return de;

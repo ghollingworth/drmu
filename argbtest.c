@@ -29,6 +29,7 @@
 
 #include "drmu.h"
 #include "drmu_log.h"
+#include "drmu_output.h"
 #include <drm_fourcc.h>
 
 #define TRACE_ALL 0
@@ -83,6 +84,7 @@ int main(int argc, char *argv[])
     unsigned int i;
 
     drmu_env_t * du = NULL;
+    drmu_output_t * dout = NULL;
     drmu_crtc_t * dc = NULL;
     drmu_plane_t * p0 = NULL;
     drmu_plane_t * psub[4] = {NULL};
@@ -111,8 +113,11 @@ int main(int argc, char *argv[])
     (void)argc;
     (void)argv;
 
-    if ((dc = drmu_crtc_new_find(du)) == NULL)
+    if ((dout = drmu_output_new(du)) == NULL)
         goto fail;
+    if (drmu_output_add_output(dout, NULL) != 0)
+        goto fail;
+    dc = drmu_output_crtc(dout);
 
     // **** Plane selection needs noticable improvement
     // This wants to be the primary

@@ -31,6 +31,7 @@
 
 #include "drmu.h"
 #include "drmu_log.h"
+#include "drmu_output.h"
 #include "drmu_util.h"
 #include <drm_fourcc.h>
 
@@ -308,6 +309,7 @@ usage()
 int main(int argc, char *argv[])
 {
     drmu_env_t * du = NULL;
+    drmu_output_t * dout = NULL;
     drmu_crtc_t * dc = NULL;
     drmu_plane_t * p1 = NULL;
     drmu_fb_t * fb1 = NULL;
@@ -447,21 +449,24 @@ int main(int argc, char *argv[])
 
     da = drmu_atomic_new(du);
 
-    if ((dc = drmu_crtc_new_find(du)) == NULL)
+    if ((dout = drmu_output_new(du)) == NULL)
         goto fail;
+    if (drmu_output_add_output(dout, NULL) != 0)
+        goto fail;
+    dc = drmu_output_crtc(dout);
 
-    drmu_crtc_max_bpc_allow(dc, hi_bpc);
+    drmu_output_max_bpc_allow(dout, hi_bpc);
 
     if (!mode_req) {
-        drmu_mode_pick_simple_params_t pickparam = drmu_crtc_mode_simple_params(dc, -1);
-        dw = pickparam.width;
-        dh = pickparam.height;
+        const drmu_mode_simple_params_t * const sp = drmu_output_mode_simple_params(dout);
+        dw = sp->width;
+        dh = sp->height;
         printf("Mode %dx%d@%d.%03d\n",
-               pickparam.width, pickparam.height, pickparam.hz_x_1000 / 1000, pickparam.hz_x_1000 % 1000);
+               sp->width, sp->height, sp->hz_x_1000 / 1000, sp->hz_x_1000 % 1000);
     }
     else
     {
-        drmu_mode_pick_simple_params_t pickparam = drmu_crtc_mode_simple_params(dc, -1);
+        drmu_mode_simple_params_t pickparam = *drmu_output_mode_simple_params(dout);
         int mode;
 
         if (dw || dh) {
@@ -470,10 +475,10 @@ int main(int argc, char *argv[])
         }
         pickparam.hz_x_1000 = hz;  // 0 is legit -pick something
 
-        mode = drmu_crtc_mode_pick(dc, drmu_mode_pick_simple_cb, &pickparam);
+        mode = drmu_output_mode_pick_simple(dout, drmu_mode_pick_simple_cb, &pickparam);
 
         if (mode != -1) {
-            const drmu_mode_pick_simple_params_t m = drmu_crtc_mode_simple_params(dc, mode);
+            const drmu_mode_simple_params_t m = drmu_crtc_mode_simple_params(dc, mode);
             printf("Mode requested %dx%d@%d.%03d; found %dx%d@%d.%03d\n",
                    pickparam.width, pickparam.height, pickparam.hz_x_1000 / 1000, pickparam.hz_x_1000 % 1000,
                    m.width, m.height, m.hz_x_1000 / 1000, m.hz_x_1000 % 1000);

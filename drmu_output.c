@@ -1,26 +1,80 @@
 #include "drmu_output.h"
 #include "drmu_log.h"
 
+#include <errno.h>
+#include <string.h>
+
+#include <libdrm/drm.h>
+#include <libdrm/drm_mode.h>
+
+// Update return value with a new one for cases where we don't stop on error
+static inline int rvup(int rv1, int rv2)
+{
+    return rv2 ? rv2 : rv1;
+}
+
 struct drmu_output_s {
     drmu_env_t * du;
     drmu_crtc_t * dc;
     unsigned int conn_n;
     unsigned int conn_size;
     drmu_conn_t ** dns;
-    bool max_bpc_alloc;
+    bool max_bpc_allow;
+    int mode_id;
+    drmu_mode_simple_params_t mode_params;
+
+    // These are expected to be static consts so no copy / no free
+    const drmu_format_info_t * fmt_info;
+    const char * colorspace;
+    const char * broadcast_rgb;
+
+    // HDR metadata
+    drmu_isset_t hdr_metadata_isset;
+    struct hdr_output_metadata hdr_metadata;
 };
 
 int
 drmu_atomic_add_output_props(drmu_atomic_t * const da, drmu_output_t * const dout)
 {
-#warning NIF
-    return 0;
+    int rv = 0;
+
+    if (dout->fmt_info)
+        rv = rvup(rv, drmu_atomic_crtc_hi_bpc_set(da, dout->dc, (drmu_format_info_bit_depth(dout->fmt_info) > 8)));
+    if (dout->colorspace)
+        rv = rvup(rv, drmu_atomic_crtc_colorspace_set(da, dout->dc, dout->colorspace));
+    if (dout->broadcast_rgb)
+        rv = rvup(rv, drmu_atomic_crtc_broadcast_rgb_set(da, dout->dc, dout->broadcast_rgb));
+    if (dout->hdr_metadata_isset != DRMU_ISSET_UNSET)
+        rv = rvup(rv, drmu_atomic_crtc_hdr_metadata_set(da, dout->dc,
+            dout->hdr_metadata_isset == DRMU_ISSET_NULL ? NULL : &dout->hdr_metadata));
+
+    return rv;
 }
 
+// Set all the fb info props that might apply to a crtc on the crtc
+// (e.g. hdr_metadata, colorspace) but do not set the mode (resolution
+// and refresh)
 int
 drmu_output_fb_info_set(drmu_output_t * const dout, const drmu_fb_t * const fb)
 {
-#warning NIF
+    drmu_isset_t hdr_isset = drmu_fb_hdr_metadata_isset(fb);
+    const drmu_format_info_t * fmt_info = drmu_fb_format_info_get(fb);
+    const char * colorspace             = drmu_fb_colorspace_get(fb);
+    const char * broadcast_rgb          = drmu_color_range_to_broadcast_rgb(drmu_fb_color_range_get(fb));
+
+    if (fmt_info)
+        dout->fmt_info = fmt_info;
+    if (colorspace)
+        dout->colorspace = colorspace;
+    if (broadcast_rgb)
+        dout->broadcast_rgb = broadcast_rgb;
+
+    if (hdr_isset != DRMU_ISSET_UNSET) {
+        dout->hdr_metadata_isset = hdr_isset;
+        if (hdr_isset == DRMU_ISSET_SET)
+            dout->hdr_metadata = *drmu_fb_hdr_metadata_get(fb);
+    }
+
     return 0;
 }
 
@@ -28,37 +82,37 @@ drmu_output_fb_info_set(drmu_output_t * const dout, const drmu_fb_t * const fb)
 int
 drmu_output_mode_id_set(drmu_output_t * const dout, const int mode_id)
 {
-#warning NIF
+    if (mode_id != dout->mode_id) {
+        drmu_mode_simple_params_t sp = drmu_crtc_mode_simple_params(dout->dc, mode_id);
+        if (sp.width == 0)
+            return -EINVAL;
+
+        dout->mode_id = mode_id;
+        dout->mode_params = sp;
+    }
     return 0;
 }
 
-unsigned int
-drmu_output_width(const drmu_output_t * const dout)
+const drmu_mode_simple_params_t *
+drmu_output_mode_simple_params(const drmu_output_t * const dout)
 {
-#warning NIF
-    return 0;
-}
-
-unsigned int drmu_output_height(const drmu_output_t * const dout)
-{
-#warning NIF
-    return 0;
+    return &dout->mode_params;
 }
 
 int
-drmu_mode_pick_simple_cb(void * v, const drmu_mode_pick_simple_params_t * mode)
+drmu_mode_pick_simple_cb(void * v, const drmu_mode_simple_params_t * mode)
 {
-    const drmu_mode_pick_simple_params_t * const p = v;
+    const drmu_mode_simple_params_t * const p = v;
 
     const int pref = (mode->type & DRM_MODE_TYPE_PREFERRED) != 0;
-    const unsigned int r_m = (uint32_t)(((uint64_t)mode->clock * 1000000) / (mode->htotal * mode->vtotal));
+    const unsigned int r_m = mode->hz_x_1000;
     const unsigned int r_f = p->hz_x_1000;
 
     // We don't understand interlace
     if ((mode->flags & DRM_MODE_FLAG_INTERLACE) != 0)
         return -1;
 
-    if (p->width == mode->hdisplay && p->height == mode->vdisplay)
+    if (p->width == mode->width && p->height == mode->height)
     {
         // If we haven't been given any hz then pick pref or fastest
         // Max out at 300Hz (=300,0000)
@@ -84,14 +138,14 @@ drmu_mode_pick_simple_cb(void * v, const drmu_mode_pick_simple_params_t * mode)
 }
 
 int
-drmu_output_mode_pick_simple(drmu_crtc_t * const dout, drmu_mode_score_fn * const score_fn, void * const score_v)
+drmu_output_mode_pick_simple(drmu_output_t * const dout, drmu_mode_score_fn * const score_fn, void * const score_v)
 {
     int best_score = -1;
     int best_mode = -1;
     int i;
 
     for (i = 0;; ++i) {
-        const drmu_mode_pick_simple_params_t sp = drmu_crtc_mode_simple_params(dout->dc, i);
+        const drmu_mode_simple_params_t sp = drmu_crtc_mode_simple_params(dout->dc, i);
         int score;
 
         if (sp.width == 0)
@@ -133,7 +187,7 @@ drmu_output_add_output(drmu_output_t * const dout, const char * const conn_name)
         // This prefers conns that are already attached to crtcs
         dn = dn_t;
         if ((crtc_id = drmu_conn_crtc_id_get(dn_t)) == 0 ||
-            (dc_t = drmu_crtc_find_id(du, conn_id)) == NULL)
+            (dc_t = drmu_crtc_find_id(du, crtc_id)) == NULL)
             continue;
         break;
     }
@@ -163,6 +217,17 @@ drmu_output_add_output(drmu_output_t * const dout, const char * const conn_name)
     return 0;
 }
 
+drmu_crtc_t *
+drmu_output_crtc(const drmu_output_t * const dout)
+{
+    return !dout ? NULL : dout->dc;
+}
+
+drmu_conn_t *
+drmu_output_conn(const drmu_output_t * const dout, const unsigned int n)
+{
+    return !dout || n >= dout->conn_n ? NULL : dout->dns[n];
+}
 
 static void
 output_free(drmu_output_t * const dout)

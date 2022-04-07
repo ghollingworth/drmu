@@ -43,12 +43,6 @@ typedef struct drmu_bo_env_s {
 } drmu_bo_env_t;
 
 
-typedef enum drmu_isset_e {
-    DRMU_ISSET_UNSET = 0,  // Thing unset
-    DRMU_ISSET_NULL,       // Thing is empty
-    DRMU_ISSET_SET,        // Thing has valid data
-} drmu_isset_t;
-
 struct drmu_format_info_s;
 
 typedef struct drmu_fb_s {

@@ -27,6 +27,9 @@ typedef struct drmu_bo_env_s drmu_bo_env_t;
 struct drmu_fb_s;
 typedef struct drmu_fb_s drmu_fb_t;
 
+struct drmu_format_info_s;
+typedef struct drmu_format_info_s drmu_format_info_t;
+
 struct drmu_pool_s;
 typedef struct drmu_pool_s drmu_pool_t;
 
@@ -70,6 +73,12 @@ enum hdmi_eotf
     HDMI_EOTF_SMPTE_ST2084,
     HDMI_EOTF_BT_2100_HLG,
 };
+
+typedef enum drmu_isset_e {
+    DRMU_ISSET_UNSET = 0,  // Thing unset
+    DRMU_ISSET_NULL,       // Thing is empty
+    DRMU_ISSET_SET,        // Thing has valid data
+} drmu_isset_t;
 
 drmu_ufrac_t drmu_ufrac_reduce(drmu_ufrac_t x);
 
@@ -165,6 +174,10 @@ drmu_bo_t * drmu_bo_new_dumb(drmu_env_t *const du, struct drm_mode_create_dumb *
 void drmu_bo_env_uninit(drmu_bo_env_t * const boe);
 void drmu_bo_env_init(drmu_bo_env_t * boe);
 
+// format_info
+
+unsigned int drmu_format_info_bit_depth(const drmu_format_info_t * const fmt_info);
+
 // fb
 struct hdr_output_metadata;
 struct drmu_format_info_s;
@@ -221,7 +234,7 @@ void drmu_fb_int_on_delete_set(drmu_fb_t *const dfb, drmu_fb_on_delete_fn fn, vo
 void drmu_fb_int_bo_set(drmu_fb_t *const dfb, unsigned int i, drmu_bo_t * const bo);
 void drmu_fb_int_layer_set(drmu_fb_t *const dfb, unsigned int i, unsigned int obj_idx, uint32_t pitch, uint32_t offset);
 void drmu_fb_int_layer_mod_set(drmu_fb_t *const dfb, unsigned int i, unsigned int obj_idx, uint32_t pitch, uint32_t offset, uint64_t modifier);
-bool drmu_fb_hdr_metadata_isset(const drmu_fb_t *const dfb);
+drmu_isset_t drmu_fb_hdr_metadata_isset(const drmu_fb_t *const dfb);
 const struct hdr_output_metadata * drmu_fb_hdr_metadata_get(const drmu_fb_t *const dfb);
 const char * drmu_color_range_to_broadcast_rgb(const char * const range);
 const char * drmu_fb_colorspace_get(const drmu_fb_t * const dfb);
@@ -262,18 +275,19 @@ uint32_t drmu_crtc_height(const drmu_crtc_t * const dc);
 drmu_ufrac_t drmu_crtc_sar(const drmu_crtc_t * const dc);
 void drmu_crtc_max_bpc_allow(drmu_crtc_t * const dc, const bool max_bpc_allowed);
 
+drmu_crtc_t * drmu_crtc_find_id(drmu_env_t * const du, const uint32_t crtc_id);
+
 typedef struct drmu_mode_pick_simple_params_s {
     unsigned int width;
     unsigned int height;
     unsigned int hz_x_1000;  // Refresh rate * 1000 i.e. 50Hz = 50000
-    uint32_t flags;          // Nothing currently - but things like interlace could turn up here
-} drmu_mode_pick_simple_params_t;
+    uint32_t type;
+    uint32_t flags;
+} drmu_mode_simple_params_t;
 
 // Get simple properties of a mode_id
 // If mode_id == -1 retrieves params for current mode
-drmu_mode_pick_simple_params_t drmu_crtc_mode_simple_params(const drmu_crtc_t * const dc, const int mode_id);
-
-drmu_crtc_t * drmu_crtc_new_find(drmu_env_t * const du);
+drmu_mode_simple_params_t drmu_crtc_mode_simple_params(const drmu_crtc_t * const dc, const int mode_id);
 
 // False set max_bpc to 8, true max value
 int drmu_atomic_crtc_hi_bpc_set(struct drmu_atomic_s * const da, drmu_crtc_t * const dc, bool hi_bpc);
@@ -288,11 +302,6 @@ int drmu_atomic_crtc_mode_id_set(struct drmu_atomic_s * const da, drmu_crtc_t * 
 
 // Set none if m=NULL
 int drmu_atomic_crtc_hdr_metadata_set(struct drmu_atomic_s * const da, drmu_crtc_t * const dc, const struct hdr_output_metadata * const m);
-
-// Set all the fb info props that might apply to a crtc on the crtc
-// (e.g. hdr_metadata, colorspace) but do not set the mode (resolution
-// and refresh)
-int drmu_atomic_crtc_fb_info_set(struct drmu_atomic_s * const da, drmu_crtc_t * const dc, const drmu_fb_t * const fb);
 
 // Connector
 

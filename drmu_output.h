@@ -1,4 +1,14 @@
+#ifndef _DRMU_DRMU_OUTPUT_H
+#define _DRMU_DRMU_OUTPUT_H
+
 #include "drmu.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+struct drmu_output_s;
+typedef struct drmu_output_s drmu_output_t;
 
 // Add all props accumulated on the output to the atomic
 int drmu_atomic_add_output_props(drmu_atomic_t * const da, drmu_output_t * const dout);
@@ -10,12 +20,11 @@ int drmu_output_fb_info_set(drmu_output_t * const dout, const drmu_fb_t * const 
 int drmu_output_mode_id_set(drmu_output_t * const dout, const int mode_id);
 
 // Width/height of the currebnt mode
-unsigned int drmu_output_width(const drmu_output_t * const dout);
-unsigned int drmu_output_height(const drmu_output_t * const dout);
+const drmu_mode_simple_params_t * drmu_output_mode_simple_params(const drmu_output_t * const dout);
 
-typedef int drmu_mode_score_fn drmu_mode_score(void * v, const drmu_mode_pick_simple_params_t * mode);
+typedef int drmu_mode_score_fn(void * v, const drmu_mode_simple_params_t * mode);
 
-int drmu_output_mode_pick_simple(drmu_crtc_t * const dc, drmu_mode_score_fn * const score_fn, void * const score_v);
+int drmu_output_mode_pick_simple(drmu_output_t * const dout, drmu_mode_score_fn * const score_fn, void * const score_v);
 
 // Simple mode picker cb - looks for width / height and then refresh
 // If nothing "plausible" defaults to EDID preferred mode
@@ -29,10 +38,20 @@ int drmu_output_max_bpc_allow(drmu_output_t * const dout, const bool allow);
 // If != NULL then 1st conn with prefix-matching name is used
 int drmu_output_add_output(drmu_output_t * const dout, const char * const conn_name);
 
+// Conn & CRTC for when output isn't fine grained enough
+drmu_crtc_t * drmu_output_crtc(const drmu_output_t * const dout);
+drmu_conn_t * drmu_output_conn(const drmu_output_t * const dout, const unsigned int n);
+
 // Create a new empty output - has no crtc or conn
 drmu_output_t * drmu_output_new(drmu_env_t * const du);
 
 // Unref an output
 void drmu_output_unref(drmu_output_t ** const ppdout);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
 
 

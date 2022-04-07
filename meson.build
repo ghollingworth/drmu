@@ -84,16 +84,6 @@ executable(
 )
 
 executable(
-	'wbtest',
-	'wbtest.c',
-	link_with : [ drmu_base ],
-	dependencies : [
-		threads_dep,
-		libdrm_dep,
-	],
-)
-
-executable(
 	'resethdr',
 	'resethdr.c',
 	link_with : [ drmu_base, drmu_xlease ],

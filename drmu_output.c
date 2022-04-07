@@ -37,16 +37,21 @@ int
 drmu_atomic_add_output_props(drmu_atomic_t * const da, drmu_output_t * const dout)
 {
     int rv = 0;
+    unsigned int i;
 
-    if (dout->fmt_info)
-        rv = rvup(rv, drmu_atomic_crtc_hi_bpc_set(da, dout->dc, (drmu_format_info_bit_depth(dout->fmt_info) > 8)));
-    if (dout->colorspace)
-        rv = rvup(rv, drmu_atomic_crtc_colorspace_set(da, dout->dc, dout->colorspace));
-    if (dout->broadcast_rgb)
-        rv = rvup(rv, drmu_atomic_crtc_broadcast_rgb_set(da, dout->dc, dout->broadcast_rgb));
-    if (dout->hdr_metadata_isset != DRMU_ISSET_UNSET)
-        rv = rvup(rv, drmu_atomic_crtc_hdr_metadata_set(da, dout->dc,
-            dout->hdr_metadata_isset == DRMU_ISSET_NULL ? NULL : &dout->hdr_metadata));
+    for (i = 0; i != dout->conn_n; ++i) {
+        drmu_conn_t * const dn = dout->dns[i];
+
+        if (dout->fmt_info)
+            rv = rvup(rv, drmu_atomic_conn_hi_bpc_set(da, dn, (drmu_format_info_bit_depth(dout->fmt_info) > 8)));
+        if (dout->colorspace)
+            rv = rvup(rv, drmu_atomic_conn_colorspace_set(da, dn, dout->colorspace));
+        if (dout->broadcast_rgb)
+            rv = rvup(rv, drmu_atomic_conn_broadcast_rgb_set(da, dn, dout->broadcast_rgb));
+        if (dout->hdr_metadata_isset != DRMU_ISSET_UNSET)
+            rv = rvup(rv, drmu_atomic_conn_hdr_metadata_set(da, dn,
+                dout->hdr_metadata_isset == DRMU_ISSET_NULL ? NULL : &dout->hdr_metadata));
+    }
 
     return rv;
 }
@@ -83,7 +88,7 @@ int
 drmu_output_mode_id_set(drmu_output_t * const dout, const int mode_id)
 {
     if (mode_id != dout->mode_id) {
-        drmu_mode_simple_params_t sp = drmu_crtc_mode_simple_params(dout->dc, mode_id);
+        drmu_mode_simple_params_t sp = drmu_conn_mode_simple_params(dout->dns[0], mode_id);
         if (sp.width == 0)
             return -EINVAL;
 
@@ -145,7 +150,7 @@ drmu_output_mode_pick_simple(drmu_output_t * const dout, drmu_mode_score_fn * co
     int i;
 
     for (i = 0;; ++i) {
-        const drmu_mode_simple_params_t sp = drmu_crtc_mode_simple_params(dout->dc, i);
+        const drmu_mode_simple_params_t sp = drmu_conn_mode_simple_params(dout->dns[0], i);
         int score;
 
         if (sp.width == 0)

@@ -220,6 +220,12 @@ aprop_obj_prop_get(aprop_obj_t * const po, const uint32_t id)
     unsigned int i;
     aprop_prop_t * pp = po->props;
 
+    static const drmu_atomic_prop_fns_t null_fns = {
+        .ref    = drmu_prop_fn_null_ref,
+        .unref  = drmu_prop_fn_null_unref,
+        .commit = drmu_prop_fn_null_commit
+    };
+
     for (i = 0; i != po->n; ++i, ++pp) {
         if (pp->id == id)
             return pp;
@@ -240,6 +246,7 @@ aprop_obj_prop_get(aprop_obj_t * const po, const uint32_t id)
     ++po->n;
 
     pp->id = id;
+    pp->fns = &null_fns;
     return pp;
 }
 
@@ -545,11 +552,6 @@ drmu_atomic_add_prop_generic(drmu_atomic_t * const da,
                   const drmu_atomic_prop_fns_t * const fns, void * const v)
 {
     aprop_hdr_t * const ph = &da->props;
-    static const drmu_atomic_prop_fns_t null_fns = {
-        .ref    = drmu_prop_fn_null_ref,
-        .unref  = drmu_prop_fn_null_unref,
-        .commit = drmu_prop_fn_null_commit
-    };
 
     if (obj_id == 0 || prop_id == 0)
     {
@@ -563,8 +565,10 @@ drmu_atomic_add_prop_generic(drmu_atomic_t * const da,
 
         aprop_prop_unref(pp);
         pp->value = value;
-        pp->fns = !fns ? &null_fns : fns;
-        pp->v = v;
+        if (fns) {
+            pp->fns = fns;
+            pp->v = v;
+        }
         aprop_prop_ref(pp);
         return 0;
     }

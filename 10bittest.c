@@ -311,6 +311,7 @@ int main(int argc, char *argv[])
     drmu_env_t * du = NULL;
     drmu_output_t * dout = NULL;
     drmu_crtc_t * dc = NULL;
+    drmu_conn_t * dn = NULL;
     drmu_plane_t * p1 = NULL;
     drmu_fb_t * fb1 = NULL;
     drmu_atomic_t * da = NULL;
@@ -377,11 +378,11 @@ int main(int argc, char *argv[])
             case 'R': {
                 const char * s = optarg;
                 if (strcmp(s, "full") == 0)
-                    range = DRMU_CRTC_BROADCAST_RGB_FULL;
+                    range = DRMU_BROADCAST_RGB_FULL;
                 else if (strcmp(s, "limited") == 0)
-                    range = DRMU_CRTC_BROADCAST_RGB_LIMITED_16_235;
+                    range = DRMU_BROADCAST_RGB_LIMITED_16_235;
                 else if (strcmp(s, "auto") == 0)
-                    range = DRMU_CRTC_BROADCAST_RGB_AUTOMATIC;
+                    range = DRMU_BROADCAST_RGB_AUTOMATIC;
                 else {
                     printf("Unrecognised broadcast range - valid values are auto, limited, full\n");
                     exit(1);
@@ -454,6 +455,7 @@ int main(int argc, char *argv[])
     if (drmu_output_add_output(dout, NULL) != 0)
         goto fail;
     dc = drmu_output_crtc(dout);
+    dn = drmu_output_conn(dout, 0);
 
     drmu_output_max_bpc_allow(dout, hi_bpc);
 
@@ -478,7 +480,7 @@ int main(int argc, char *argv[])
         mode = drmu_output_mode_pick_simple(dout, drmu_mode_pick_simple_cb, &pickparam);
 
         if (mode != -1) {
-            const drmu_mode_simple_params_t m = drmu_crtc_mode_simple_params(dc, mode);
+            const drmu_mode_simple_params_t m = drmu_conn_mode_simple_params(dn, mode);
             printf("Mode requested %dx%d@%d.%03d; found %dx%d@%d.%03d\n",
                    pickparam.width, pickparam.height, pickparam.hz_x_1000 / 1000, pickparam.hz_x_1000 % 1000,
                    m.width, m.height, m.hz_x_1000 / 1000, m.hz_x_1000 % 1000);
@@ -490,7 +492,7 @@ int main(int argc, char *argv[])
                 goto fail;
             }
 
-            drmu_atomic_crtc_mode_id_set(da, dc, mode);
+            drmu_atomic_crtc_add_modeinfo(da, dc, drmu_conn_modeinfo(dn, mode));
 
             dw = m.width;
             dh = m.height;
@@ -560,19 +562,19 @@ int main(int argc, char *argv[])
             .max_fall = 400
         }
     };
-    if (drmu_atomic_crtc_hdr_metadata_set(da, dc, &meta) != 0) {
+    if (drmu_atomic_conn_hdr_metadata_set(da, dn, &meta) != 0) {
         fprintf(stderr, "Failed metadata set");
         goto fail;
     }
-    if (drmu_atomic_crtc_colorspace_set(da, dc, colorspace) != 0) {
+    if (drmu_atomic_conn_colorspace_set(da, dn, colorspace) != 0) {
         fprintf(stderr, "Failed to set colorspace to '%s'\n", colorspace);
         goto fail;
     }
-    if (drmu_atomic_crtc_broadcast_rgb_set(da, dc, broadcast_rgb) != 0) {
+    if (drmu_atomic_conn_broadcast_rgb_set(da, dn, broadcast_rgb) != 0) {
         fprintf(stderr, "Failed to set broadcast_rgb to '%s'\n", broadcast_rgb);
         goto fail;
     }
-    if (drmu_atomic_crtc_hi_bpc_set(da, dc, hi_bpc) != 0)
+    if (drmu_atomic_conn_hi_bpc_set(da, dn, hi_bpc) != 0)
         fprintf(stderr, "Failed hi bpc set\n");
 
     drmu_atomic_queue(&da);

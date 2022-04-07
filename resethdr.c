@@ -28,11 +28,11 @@ int main(int argc, char *argv[])
 {
     drmu_env_t * du = NULL;
     drmu_output_t * dout = NULL;
-    drmu_crtc_t * dc = NULL;
+    drmu_conn_t * dn = NULL;
     drmu_atomic_t * da = NULL;
     int rv;
 
-    const char * colorspace = DRMU_CRTC_COLORSPACE_DEFAULT;
+    const char * colorspace = DRMU_COLORSPACE_DEFAULT;
 
     if (argc >= 3 && strcmp(argv[1], "-c") == 0)
         colorspace = argv[2];
@@ -54,16 +54,16 @@ int main(int argc, char *argv[])
         goto fail;
     if (drmu_output_add_output(dout, NULL) != 0)
         goto fail;
-    dc = drmu_output_crtc(dout);
+    dn = drmu_output_conn(dout, 0);
 
     if ((da = drmu_atomic_new(du)) == NULL)
         goto fail;
 
-    if (drmu_atomic_crtc_hdr_metadata_set(da, dc, NULL))
+    if (drmu_atomic_conn_hdr_metadata_set(da, dn, NULL))
         goto fail;
-    if (drmu_atomic_crtc_colorspace_set(da, dc, colorspace))
+    if (drmu_atomic_conn_colorspace_set(da, dn, colorspace))
         fprintf(stderr, "Failed to set colorspace '%s'\n", colorspace);
-    if (drmu_atomic_crtc_hi_bpc_set(da, dc, false))
+    if (drmu_atomic_conn_hi_bpc_set(da, dn, false))
         fprintf(stderr, "Failed to reset hi bpc\n");
 
     if ((rv = drmu_atomic_commit(da, DRM_MODE_ATOMIC_ALLOW_MODESET)) != 0)

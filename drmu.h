@@ -129,8 +129,16 @@ drmu_chroma_siting_eq(const drmu_chroma_siting_t a, const drmu_chroma_siting_t b
 
 void drmu_blob_unref(drmu_blob_t ** const ppBlob);
 uint32_t drmu_blob_id(const drmu_blob_t * const blob);
+// blob data & length
+const void * drmu_blob_data(const drmu_blob_t * const blob);
+size_t drmu_blob_len(const drmu_blob_t * const blob);
+
 drmu_blob_t * drmu_blob_ref(drmu_blob_t * const blob);
+// Make a new blob - keeps a copy of the data
 drmu_blob_t * drmu_blob_new(drmu_env_t * const du, const void * const data, const size_t len);
+// Update a blob with new data
+// Creates if it didn't exist before, unrefs if data NULL
+int drmu_blob_update(drmu_env_t * const du, drmu_blob_t ** const ppblob, const void * const data, const size_t len);
 // Create a new blob from an existing blob_id
 drmu_blob_t * drmu_blob_copy_id(drmu_env_t * const du, uint32_t blob_id);
 int drmu_atomic_add_prop_blob(struct drmu_atomic_s * const da, const uint32_t obj_id, const uint32_t prop_id, drmu_blob_t * const blob);
@@ -285,25 +293,29 @@ typedef struct drmu_mode_pick_simple_params_s {
     uint32_t flags;
 } drmu_mode_simple_params_t;
 
-// Get simple properties of a mode_id
-// If mode_id == -1 retrieves params for current mode
-drmu_mode_simple_params_t drmu_crtc_mode_simple_params(const drmu_crtc_t * const dc, const int mode_id);
+const struct drm_mode_modeinfo * drmu_crtc_modeinfo(const drmu_crtc_t * const dc);
+// Get simple properties of initial crtc mode
+drmu_mode_simple_params_t drmu_crtc_mode_simple_params(const drmu_crtc_t * const dc);
 
-// False set max_bpc to 8, true max value
-int drmu_atomic_crtc_hi_bpc_set(struct drmu_atomic_s * const da, drmu_crtc_t * const dc, bool hi_bpc);
-
-#define DRMU_CRTC_COLORSPACE_DEFAULT            "Default"
-int drmu_atomic_crtc_colorspace_set(struct drmu_atomic_s * const da, drmu_crtc_t * const dc, const char * colorspace);
-#define DRMU_CRTC_BROADCAST_RGB_AUTOMATIC       "Automatic"
-#define DRMU_CRTC_BROADCAST_RGB_FULL            "Full"
-#define DRMU_CRTC_BROADCAST_RGB_LIMITED_16_235  "Limited 16:235"
-int drmu_atomic_crtc_broadcast_rgb_set(struct drmu_atomic_s * const da, drmu_crtc_t * const dc, const char * bcrgb);
-int drmu_atomic_crtc_mode_id_set(struct drmu_atomic_s * const da, drmu_crtc_t * const dc, const int mode_id);
-
-// Set none if m=NULL
-int drmu_atomic_crtc_hdr_metadata_set(struct drmu_atomic_s * const da, drmu_crtc_t * const dc, const struct hdr_output_metadata * const m);
+int drmu_atomic_crtc_add_modeinfo(struct drmu_atomic_s * const da, drmu_crtc_t * const dc, const struct drm_mode_modeinfo * const modeinfo);
 
 // Connector
+
+// Set none if m=NULL
+int drmu_atomic_conn_hdr_metadata_set(struct drmu_atomic_s * const da, drmu_conn_t * const dn, const struct hdr_output_metadata * const m);
+
+// False set max_bpc to 8, true max value
+int drmu_atomic_conn_hi_bpc_set(struct drmu_atomic_s * const da, drmu_conn_t * const dn, bool hi_bpc);
+
+#define DRMU_COLORSPACE_DEFAULT            "Default"
+int drmu_atomic_conn_colorspace_set(struct drmu_atomic_s * const da, drmu_conn_t * const dn, const char * colorspace);
+#define DRMU_BROADCAST_RGB_AUTOMATIC       "Automatic"
+#define DRMU_BROADCAST_RGB_FULL            "Full"
+#define DRMU_BROADCAST_RGB_LIMITED_16_235  "Limited 16:235"
+int drmu_atomic_conn_broadcast_rgb_set(struct drmu_atomic_s * const da, drmu_conn_t * const dn, const char * bcrgb);
+
+const struct drm_mode_modeinfo * drmu_conn_modeinfo(const drmu_conn_t * const dn, const int mode_id);
+drmu_mode_simple_params_t drmu_conn_mode_simple_params(const drmu_conn_t * const dn, const int mode_id);
 
 // Beware: this refects initial value or the last thing set, but currently
 // has no way of guessing if the atomic from the set was ever committed

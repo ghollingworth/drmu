@@ -39,6 +39,8 @@ drmu_atomic_add_output_props(drmu_atomic_t * const da, drmu_output_t * const dou
     int rv = 0;
     unsigned int i;
 
+    rv = drmu_atomic_crtc_add_modeinfo(da, dout->dc, drmu_conn_modeinfo(dout->dns[0], dout->mode_id));
+
     for (i = 0; i != dout->conn_n; ++i) {
         drmu_conn_t * const dn = dout->dns[i];
 
@@ -87,6 +89,8 @@ drmu_output_fb_info_set(drmu_output_t * const dout, const drmu_fb_t * const fb)
 int
 drmu_output_mode_id_set(drmu_output_t * const dout, const int mode_id)
 {
+    drmu_info(dout->du, "%s: mode_id=%d", __func__, mode_id);
+
     if (mode_id != dout->mode_id) {
         drmu_mode_simple_params_t sp = drmu_conn_mode_simple_params(dout->dns[0], mode_id);
         if (sp.width == 0)

@@ -1887,17 +1887,31 @@ drmu_crtc_max_bpc_allow(drmu_crtc_t * const dc, const bool max_bpc_allowed)
 }
 
 static int
-crtc_init(drmu_env_t * const du, drmu_crtc_t * const dc, const uint32_t crtc_id)
+crtc_init(drmu_env_t * const du, drmu_crtc_t * const dc, const unsigned int idx, const uint32_t crtc_id)
 {
     int rv;
+    drmu_props_t * props;
 
     memset(dc, 0, sizeof(*dc));
     dc->du = du;
+    dc->crtc_idx = idx;
     dc->crtc.crtc_id = crtc_id;
 
     if ((rv = drmu_ioctl(du, DRM_IOCTL_MODE_GETCRTC, &dc->crtc)) != 0) {
         drmu_err(du, "Failed to get crtc id %d: %s", crtc_id, strerror(-rv));
         return rv;
+    }
+
+    props = props_new(du, dc->crtc.crtc_id, DRM_MODE_OBJECT_CRTC);
+
+    if (props != NULL) {
+#if TRACE_PROP_NEW || 1
+        drmu_info(du, "CRTC id=%#x, idx=%d:", dc->crtc.crtc_id, dc->crtc_idx);
+        props_dump(props);
+#endif
+        dc->pid.mode_id = props_name_to_id(props, "MODE_ID");
+
+        props_free(props);
     }
 
     return 0;
@@ -3185,7 +3199,7 @@ env_crtc_populate(drmu_env_t * const du, unsigned int n, const uint32_t * const 
     }
 
     for (i = 0; i != n; ++i) {
-        if ((rv = crtc_init(du, du->crtcs + i, ids[i])) != 0)
+        if ((rv = crtc_init(du, du->crtcs + i, i, ids[i])) != 0)
             return rv;
         du->crtc_count = i;
     }

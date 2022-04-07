@@ -106,7 +106,6 @@ int drmprime_out_display(drmprime_out_env_t *de, struct AVFrame *src_frame)
 #endif
         drmu_atomic_add_output_props(da, de->dout);
         drmu_atomic_plane_fb_set(da, de->dp, dfb, r);
-        *(volatile char*)0 = 99;
         drmu_fb_unref(&dfb);
         drmu_atomic_queue(&da);
     }

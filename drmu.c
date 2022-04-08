@@ -273,30 +273,51 @@ drmu_blob_update(drmu_env_t * const du, drmu_blob_t ** const ppblob, const void 
     return 0;
 }
 
+// Data alloced here needs freeing later
+int
+blob_data_read(drmu_env_t * const du, uint32_t blob_id, void ** const ppdata, size_t * plen)
+{
+    void * data;
+    struct drm_mode_get_blob gblob = {.blob_id = blob_id};
+    int rv;
+
+    *ppdata = NULL;
+    *plen = 0;
+
+    if (blob_id == 0)
+        return 0;
+
+    if ((rv = drmu_ioctl(du, DRM_IOCTL_MODE_GETPROPBLOB, &gblob)) != 0)
+        return rv;
+
+    if (gblob.length == 0)
+        return 0;
+
+    if ((data = malloc(gblob.length)) == NULL)
+        return -ENOMEM;
+
+    gblob.data = (uintptr_t)data;
+    if ((rv = drmu_ioctl(du, DRM_IOCTL_MODE_GETPROPBLOB, &gblob)) != 0) {
+        free(data);
+        return rv;
+    }
+
+    *ppdata = data;
+    *plen = gblob.length;
+    return 0;
+}
+
 // Copy existing blob into a new one
 // Useful when saving preexisiting values
 drmu_blob_t *
 drmu_blob_copy_id(drmu_env_t * const du, uint32_t blob_id)
 {
-    drmu_blob_t * blob = NULL;
     void * data;
-    struct drm_mode_get_blob gblob = {.blob_id = blob_id};
+    size_t len;
+    drmu_blob_t * blob = NULL;
 
-    if (blob_id == 0)
-        return NULL;
-
-    if (drmu_ioctl(du, DRM_IOCTL_MODE_GETPROPBLOB, &gblob) != 0)
-        return NULL;
-
-    if (gblob.length == 0)
-        return NULL;
-
-    if ((data = malloc(gblob.length)) == NULL)
-        return NULL;
-
-    gblob.data = (uintptr_t)data;
-    if (drmu_ioctl(du, DRM_IOCTL_MODE_GETPROPBLOB, &gblob) == 0)
-        blob = drmu_blob_new(du, data, gblob.length);
+    if (blob_data_read(du, blob_id, &data, &len) == 0)
+        blob = drmu_blob_new(du, data, len);  // * This copies data - could just get it to take the malloc
 
     free(data);
     return blob;
@@ -1434,7 +1455,6 @@ props_free(drmu_props_t * const props)
 
 static const drmu_propinfo_t *
 props_name_to_propinfo(const drmu_props_t * const props, const char * const name)
-
 {
     unsigned int i = props->n / 2;
     unsigned int a = 0;
@@ -1461,6 +1481,23 @@ static uint32_t
 props_name_to_id(const drmu_props_t * const props, const char * const name)
 {
     return propinfo_prop_id(props_name_to_propinfo(props, name));
+}
+
+// Data must be freed later
+static int
+props_name_get_blob(const drmu_props_t * const props, const char * const name, void ** const ppdata, size_t * const plen)
+{
+    const drmu_propinfo_t * const pinfo = props_name_to_propinfo(props, name);
+
+    *ppdata = 0;
+    *plen = 0;
+
+    if (!pinfo)
+        return -ENOENT;
+    if ((pinfo->prop.flags & DRM_MODE_PROP_BLOB) == 0)
+        return -EINVAL;
+
+    return blob_data_read(props->du, (uint32_t)pinfo->val, ppdata, plen);
 }
 
 #if TRACE_PROP_NEW || 1
@@ -1728,9 +1765,6 @@ drmu_atomic_props_add_save(drmu_atomic_t * const da, const uint32_t objid, const
 typedef struct drmu_crtc_s {
     struct drmu_env_s * du;
     int crtc_idx;
-    bool hi_bpc_ok;
-    drmu_ufrac_t sar;
-    drmu_ufrac_t par;
 
     struct drm_mode_crtc crtc;
 
@@ -1740,7 +1774,6 @@ typedef struct drmu_crtc_s {
         // connection
     } pid;
 
-    int cur_mode_id;
     drmu_blob_t * mode_id_blob;
 
 } drmu_crtc_t;
@@ -1847,43 +1880,6 @@ int
 drmu_crtc_idx(const drmu_crtc_t * const dc)
 {
     return dc->crtc_idx;
-}
-
-uint32_t
-drmu_crtc_x(const drmu_crtc_t * const dc)
-{
-    return dc->crtc.x;
-}
-
-uint32_t
-drmu_crtc_y(const drmu_crtc_t * const dc)
-{
-    return dc->crtc.y;
-}
-
-uint32_t
-drmu_crtc_width(const drmu_crtc_t * const dc)
-{
-    return dc->crtc.mode.hdisplay;
-}
-
-uint32_t
-drmu_crtc_height(const drmu_crtc_t * const dc)
-{
-    return dc->crtc.mode.vdisplay;
-}
-
-drmu_ufrac_t
-drmu_crtc_sar(const drmu_crtc_t * const dc)
-{
-    return dc->sar;
-}
-
-void
-drmu_crtc_max_bpc_allow(drmu_crtc_t * const dc, const bool max_bpc_allowed)
-{
-    if (!max_bpc_allowed)
-        dc->hi_bpc_ok = false;
 }
 
 static int
@@ -2037,18 +2033,46 @@ fail:
 }
 #endif
 
+static drmu_ufrac_t
+modeinfo_par(const struct drm_mode_modeinfo * const mode)
+{
+    switch (mode->flags & DRM_MODE_FLAG_PIC_AR_MASK) {
+        case DRM_MODE_FLAG_PIC_AR_4_3:
+            return (drmu_ufrac_t){4,3};
+        case DRM_MODE_FLAG_PIC_AR_16_9:
+            return (drmu_ufrac_t){16,9};
+        case DRM_MODE_FLAG_PIC_AR_64_27:
+            return (drmu_ufrac_t){64,27};
+        case DRM_MODE_FLAG_PIC_AR_256_135:
+            return (drmu_ufrac_t){256,135};
+        default:
+        case DRM_MODE_FLAG_PIC_AR_NONE:
+            break;
+    }
+    return (drmu_ufrac_t){0,0};
+}
+
 static drmu_mode_simple_params_t
 modeinfo_simple_params(const struct drm_mode_modeinfo * const mode)
 {
-    return (!mode) ?
-        (drmu_mode_simple_params_t){ 0 } :
-        (drmu_mode_simple_params_t){
+    if (!mode)
+        return (drmu_mode_simple_params_t){ 0 };
+    else {
+        drmu_mode_simple_params_t rv = {
             .width = mode->hdisplay,
             .height = mode->vdisplay,
             .hz_x_1000 = (uint32_t)(((uint64_t)mode->clock * 1000000) / (mode->htotal * mode->vtotal)),
+            .par = modeinfo_par(mode),
+            .sar = {1, 1},
             .type = mode->type,
             .flags = mode->flags,
         };
+
+        if (rv.par.den != 0)
+            rv.sar = drmu_ufrac_reduce((drmu_ufrac_t) {rv.par.num * rv.height, rv.par.den * rv.width});
+
+        return rv;
+    }
 }
 
 drmu_crtc_t *
@@ -2199,17 +2223,17 @@ drmu_atomic_crtc_mode_id_set(drmu_atomic_t * const da, drmu_crtc_t * const dc, c
 static const char * conn_type_names[32] = {
     [DRM_MODE_CONNECTOR_Unknown]     = "Unknown",
     [DRM_MODE_CONNECTOR_VGA]         = "VGA",
-    [DRM_MODE_CONNECTOR_DVII]        = "DVII",
-    [DRM_MODE_CONNECTOR_DVID]        = "DVID",
-    [DRM_MODE_CONNECTOR_DVIA]        = "DVIA",
+    [DRM_MODE_CONNECTOR_DVII]        = "DVI-I",
+    [DRM_MODE_CONNECTOR_DVID]        = "DVI-D",
+    [DRM_MODE_CONNECTOR_DVIA]        = "DVI-A",
     [DRM_MODE_CONNECTOR_Composite]   = "Composite",
     [DRM_MODE_CONNECTOR_SVIDEO]      = "SVIDEO",
     [DRM_MODE_CONNECTOR_LVDS]        = "LVDS",
     [DRM_MODE_CONNECTOR_Component]   = "Component",
     [DRM_MODE_CONNECTOR_9PinDIN]     = "9PinDIN",
     [DRM_MODE_CONNECTOR_DisplayPort] = "DisplayPort",
-    [DRM_MODE_CONNECTOR_HDMIA]       = "HDMIA",
-    [DRM_MODE_CONNECTOR_HDMIB]       = "HDMIB",
+    [DRM_MODE_CONNECTOR_HDMIA]       = "HDMI-A",
+    [DRM_MODE_CONNECTOR_HDMIB]       = "HDMI-B",
     [DRM_MODE_CONNECTOR_TV]          = "TV",
     [DRM_MODE_CONNECTOR_eDP]         = "eDP",
     [DRM_MODE_CONNECTOR_VIRTUAL]     = "VIRTUAL",
@@ -2849,6 +2873,45 @@ drmu_pool_delete(drmu_pool_t ** const pppool)
 //
 // Plane fns
 
+typedef struct drmu_plane_s {
+    struct drmu_env_s * du;
+
+    // Unlike most ref counts in drmu this is 0 for unrefed, 2 for single ref
+    // and 1 for whilst unref cleanup is in progress. Guards dc
+    atomic_int ref_count;
+    struct drmu_crtc_s * dc;    // NULL if not in use
+    bool saved;
+
+    int plane_type;
+    struct drm_mode_get_plane plane;
+
+    void * formats_in;
+    size_t formats_in_len;
+    const struct drm_format_modifier_blob * fmts_hdr;
+
+    struct {
+        uint32_t crtc_id;
+        uint32_t fb_id;
+        uint32_t crtc_h;
+        uint32_t crtc_w;
+        uint32_t crtc_x;
+        uint32_t crtc_y;
+        uint32_t src_h;
+        uint32_t src_w;
+        uint32_t src_x;
+        uint32_t src_y;
+        drmu_prop_range_t * alpha;
+        drmu_prop_enum_t * color_encoding;
+        drmu_prop_enum_t * color_range;
+        drmu_prop_enum_t * pixel_blend_mode;
+        drmu_prop_bitmask_t * rotation;
+        drmu_prop_range_t * chroma_siting_h;
+        drmu_prop_range_t * chroma_siting_v;
+    } pid;
+    uint64_t rot_vals[8];
+
+} drmu_plane_t;
+
 static int
 plane_set_atomic(drmu_atomic_t * const da,
                  drmu_plane_t * const dp,
@@ -2858,7 +2921,7 @@ plane_set_atomic(drmu_atomic_t * const da,
                 uint32_t src_x, uint32_t src_y,
                 uint32_t src_w, uint32_t src_h)
 {
-    const uint32_t plid = dp->plane->plane_id;
+    const uint32_t plid = dp->plane.plane_id;
     drmu_atomic_add_prop_value(da, plid, dp->pid.crtc_id, dfb == NULL ? 0 : drmu_crtc_id(dp->dc));
     drmu_atomic_add_prop_fb(da, plid, dp->pid.fb_id, dfb);
     drmu_atomic_add_prop_value(da, plid, dp->pid.crtc_x, crtc_x);
@@ -2877,7 +2940,7 @@ drmu_atomic_add_plane_alpha(struct drmu_atomic_s * const da, const drmu_plane_t 
 {
     if (alpha == DRMU_PLANE_ALPHA_UNSET)
         return 0;
-    return drmu_atomic_add_prop_range(da, dp->plane->plane_id, dp->pid.alpha, alpha);
+    return drmu_atomic_add_prop_range(da, dp->plane.plane_id, dp->pid.alpha, alpha);
 }
 
 int
@@ -2887,7 +2950,7 @@ drmu_atomic_add_plane_rotation(struct drmu_atomic_s * const da, const drmu_plane
         return rot == DRMU_PLANE_ROTATION_0 ? 0 : -EINVAL;
     if (rot < 0 || rot >= 8 || !dp->rot_vals[rot])
         return -EINVAL;
-    return drmu_atomic_add_prop_bitmask(da, dp->plane->plane_id, dp->pid.rotation, dp->rot_vals[rot]);
+    return drmu_atomic_add_prop_bitmask(da, dp->plane.plane_id, dp->pid.rotation, dp->rot_vals[rot]);
 }
 
 int
@@ -2899,7 +2962,7 @@ drmu_atomic_plane_add_chroma_siting(struct drmu_atomic_s * const da, const drmu_
         return -ENOENT;
 
     if (!drmu_chroma_siting_eq(siting, DRMU_CHROMA_SITING_UNSPECIFIED)) {
-        const uint32_t plid = dp->plane->plane_id;
+        const uint32_t plid = dp->plane.plane_id;
         rv = drmu_atomic_add_prop_range(da, plid, dp->pid.chroma_siting_h, siting.x);
         rv = rvup(rv, drmu_atomic_add_prop_range(da, plid, dp->pid.chroma_siting_v, siting.y));
     }
@@ -2911,7 +2974,7 @@ drmu_atomic_plane_fb_set(drmu_atomic_t * const da, drmu_plane_t * const dp,
     drmu_fb_t * const dfb, const drmu_rect_t pos)
 {
     int rv;
-    const uint32_t plid = dp->plane->plane_id;
+    const uint32_t plid = dp->plane.plane_id;
 
     if (dfb == NULL) {
         rv = plane_set_atomic(da, dp, NULL,
@@ -2938,18 +3001,18 @@ drmu_atomic_plane_fb_set(drmu_atomic_t * const da, drmu_plane_t * const dp,
 uint32_t
 drmu_plane_id(const drmu_plane_t * const dp)
 {
-    return dp->plane->plane_id;
+    return dp->plane.plane_id;
 }
 
 const uint32_t *
 drmu_plane_formats(const drmu_plane_t * const dp, unsigned int * const pCount)
 {
-    *pCount = dp->plane->count_formats;
-    return dp->plane->formats;
+    *pCount = dp->fmts_hdr->count_formats;
+    return (const uint32_t *)((const uint8_t *)dp->formats_in + dp->fmts_hdr->formats_offset);
 }
 
 void
-drmu_plane_delete(drmu_plane_t ** const ppdp)
+drmu_plane_unref(drmu_plane_t ** const ppdp)
 {
     drmu_plane_t * const dp = *ppdp;
 
@@ -2957,18 +3020,47 @@ drmu_plane_delete(drmu_plane_t ** const ppdp)
         return;
     *ppdp = NULL;
 
-    drmu_prop_range_delete(&dp->pid.alpha);
-    drmu_prop_range_delete(&dp->pid.chroma_siting_h);
-    drmu_prop_range_delete(&dp->pid.chroma_siting_v);
-    drmu_prop_enum_delete(&dp->pid.color_encoding);
-    drmu_prop_enum_delete(&dp->pid.color_range);
-    drmu_prop_enum_delete(&dp->pid.pixel_blend_mode);
-    drmu_prop_enum_delete(&dp->pid.rotation);
+    if (atomic_fetch_sub(&dp->ref_count, 1) != 2)
+        return;
     dp->dc = NULL;
+    atomic_store(&dp->ref_count, 0);
 }
 
 drmu_plane_t *
-drmu_plane_new_find(drmu_crtc_t * const dc, const uint32_t fmt)
+drmu_plane_ref(drmu_plane_t * const dp)
+{
+    if (dp)
+        atomic_fetch_add(&dp->ref_count, 1);
+    return dp;
+}
+
+// Associate a plane with a crtc and ref it
+// Returns -EBUSY if plane already associated
+int
+drmu_plane_ref_crtc(drmu_plane_t * const dp, drmu_crtc_t * const dc)
+{
+    drmu_env_t * const du = dp->du;
+
+    static const int ref0 = 0;
+    if (!atomic_compare_exchange_strong(&dp->ref_count, &ref0, 2))
+        return -EBUSY;
+    dp->dc = dc;
+
+    // 1st time through save state
+    if (!dp->saved && drmu_env_restore_is_enabled(du)) {
+        drmu_props_t *props = props_new(du, drmu_plane_id(dp), DRM_MODE_OBJECT_PLANE);
+        drmu_atomic_t * da = drmu_atomic_new(du);
+        drmu_atomic_props_add_save(da, drmu_plane_id(dp), props);
+        props_free(props);
+        drmu_atomic_env_restore_add_snapshot(&da);
+        dp->saved = true;
+    }
+
+    return 0;
+}
+
+drmu_plane_t *
+drmu_plane_new_find_type(drmu_crtc_t * const dc, const unsigned int req_type)
 {
     uint32_t i;
     drmu_env_t * const du = drmu_crtc_env(dc);
@@ -2976,40 +3068,126 @@ drmu_plane_new_find(drmu_crtc_t * const dc, const uint32_t fmt)
     const uint32_t crtc_mask = (uint32_t)1 << drmu_crtc_idx(dc);
 
     for (i = 0; i != du->plane_count && dp == NULL; ++i) {
-        uint32_t j;
-        const drmModePlane * const p = du->planes[i].plane;
+        drmu_plane_t * const dp_t = du->planes + i;
+
+        // Is wanted type?
+        if ((dp_t->plane_type & req_type) == 0)
+            continue;
 
         // In use?
-        if (du->planes[i].dc != NULL)
+        if (dp_t->dc != NULL)
             continue;
 
         // Availible for this crtc?
-        if ((p->possible_crtcs & crtc_mask) == 0)
+        if ((dp_t->plane.possible_crtcs & crtc_mask) == 0)
             continue;
 
-        // Has correct format?
-        for (j = 0; j != p->count_formats; ++j) {
-            if (p->formats[j] == fmt) {
-                dp = du->planes + i;
-                break;
-            }
-        }
+        dp = dp_t;
+        break;
     }
     if (dp == NULL) {
-        drmu_err(du, "%s: No plane (count=%d) found for fmt %#x", __func__, du->plane_count, fmt);
+        drmu_err(du, "%s: No plane (count=%d) found for types %#x", __func__, du->plane_count, req_type);
         return NULL;
     }
+    return dp;
+}
 
-    if (drmu_env_restore_is_enabled(du)) {
-        drmu_props_t * props = props_new(du, drmu_plane_id(dp), DRM_MODE_OBJECT_PLANE);
-        drmu_atomic_t * da = drmu_atomic_new(du);
-        drmu_atomic_props_add_save(da, dc->crtc.crtc_id, props);
-        props_free(props);
-        drmu_atomic_env_restore_add_snapshot(&da);
+static void
+plane_uninit(drmu_plane_t * const dp)
+{
+    drmu_prop_range_delete(&dp->pid.alpha);
+    drmu_prop_range_delete(&dp->pid.chroma_siting_h);
+    drmu_prop_range_delete(&dp->pid.chroma_siting_v);
+    drmu_prop_enum_delete(&dp->pid.color_encoding);
+    drmu_prop_enum_delete(&dp->pid.color_range);
+    drmu_prop_enum_delete(&dp->pid.pixel_blend_mode);
+    drmu_prop_enum_delete(&dp->pid.rotation);
+    free(dp->formats_in);
+    dp->formats_in = NULL;
+}
+
+
+static int
+plane_init(drmu_env_t * const du, drmu_plane_t * const dp, const uint32_t plane_id)
+{
+    drmu_props_t *props;
+    int rv;
+
+    memset(dp, 0, sizeof(*dp));
+    dp->du = du;
+
+    dp->plane.plane_id = plane_id;
+    if ((rv = drmu_ioctl(du, DRM_IOCTL_MODE_GETPLANE, &dp->plane)) != 0) {
+        drmu_err(du, "%s: drmModeGetPlane failed: %s", __func__, strerror(-rv));
+        return rv;
     }
 
-    dp->dc = dc;
-    return dp;
+    if ((props = props_new(du, dp->plane.plane_id, DRM_MODE_OBJECT_PLANE)) == NULL)
+        return -EINVAL;
+
+#if TRACE_PROP_NEW
+    drmu_info(du, "Plane %d:", i);
+    props_dump(props);
+#endif
+
+    if ((dp->pid.crtc_id = props_name_to_id(props, "CRTC_ID")) == 0 ||
+        (dp->pid.fb_id  = props_name_to_id(props, "FB_ID")) == 0 ||
+        (dp->pid.crtc_h = props_name_to_id(props, "CRTC_H")) == 0 ||
+        (dp->pid.crtc_w = props_name_to_id(props, "CRTC_W")) == 0 ||
+        (dp->pid.crtc_x = props_name_to_id(props, "CRTC_X")) == 0 ||
+        (dp->pid.crtc_y = props_name_to_id(props, "CRTC_Y")) == 0 ||
+        (dp->pid.src_h  = props_name_to_id(props, "SRC_H")) == 0 ||
+        (dp->pid.src_w  = props_name_to_id(props, "SRC_W")) == 0 ||
+        (dp->pid.src_x  = props_name_to_id(props, "SRC_X")) == 0 ||
+        (dp->pid.src_y  = props_name_to_id(props, "SRC_Y")) == 0 ||
+        props_name_get_blob(props, "IN_FORMATS", &dp->formats_in, &dp->formats_in_len) != 0)
+    {
+        drmu_err(du, "%s: failed to find required id", __func__);
+        props_free(props);
+        return -EINVAL;
+    }
+    dp->fmts_hdr = dp->formats_in;
+
+    dp->pid.alpha            = drmu_prop_range_new(du, props_name_to_id(props, "alpha"));
+    dp->pid.color_encoding   = drmu_prop_enum_new(du, props_name_to_id(props, "COLOR_ENCODING"));
+    dp->pid.color_range      = drmu_prop_enum_new(du, props_name_to_id(props, "COLOR_RANGE"));
+    dp->pid.pixel_blend_mode = drmu_prop_enum_new(du, props_name_to_id(props, "pixel blend mode"));
+    dp->pid.rotation         = drmu_prop_enum_new(du, props_name_to_id(props, "rotation"));
+    dp->pid.chroma_siting_h  = drmu_prop_range_new(du, props_name_to_id(props, "CHROMA_SITING_H"));
+    dp->pid.chroma_siting_v  = drmu_prop_range_new(du, props_name_to_id(props, "CHROMA_SITING_V"));
+
+    dp->rot_vals[DRMU_PLANE_ROTATION_0] = drmu_prop_bitmask_value(dp->pid.rotation, "rotate-0");
+    if (dp->rot_vals[DRMU_PLANE_ROTATION_0]) {
+        // Flips MUST be combined with a rotate
+        if ((dp->rot_vals[DRMU_PLANE_ROTATION_X_FLIP] = drmu_prop_bitmask_value(dp->pid.rotation, "reflect-x")) != 0)
+            dp->rot_vals[DRMU_PLANE_ROTATION_X_FLIP] |= dp->rot_vals[DRMU_PLANE_ROTATION_0];
+        if ((dp->rot_vals[DRMU_PLANE_ROTATION_Y_FLIP] = drmu_prop_bitmask_value(dp->pid.rotation, "reflect-y")) != 0)
+            dp->rot_vals[DRMU_PLANE_ROTATION_Y_FLIP] |= dp->rot_vals[DRMU_PLANE_ROTATION_0];
+    }
+    dp->rot_vals[DRMU_PLANE_ROTATION_180] = drmu_prop_bitmask_value(dp->pid.rotation, "rotate-180");
+    if (!dp->rot_vals[DRMU_PLANE_ROTATION_180] && dp->rot_vals[DRMU_PLANE_ROTATION_X_FLIP] && dp->rot_vals[DRMU_PLANE_ROTATION_Y_FLIP])
+        dp->rot_vals[DRMU_PLANE_ROTATION_180] = dp->rot_vals[DRMU_PLANE_ROTATION_X_FLIP] | dp->rot_vals[DRMU_PLANE_ROTATION_Y_FLIP];
+
+    {
+        const drmu_propinfo_t * const pinfo = props_name_to_propinfo(props, "type");
+        drmu_prop_enum_t * etype = drmu_prop_enum_new(du, props_name_to_id(props, "type"));
+        const uint64_t * p;
+
+        if ((p = drmu_prop_enum_value(etype, "Primary")) && *p == pinfo->val)
+            dp->plane_type = DRMU_PLANE_TYPE_PRIMARY;
+        else if ((p = drmu_prop_enum_value(etype, "Cursor")) && *p == pinfo->val)
+            dp->plane_type = DRMU_PLANE_TYPE_CURSOR;
+        else if ((p = drmu_prop_enum_value(etype, "Overlay")) && *p == pinfo->val)
+            dp->plane_type = DRMU_PLANE_TYPE_OVERLAY;
+        else {
+            drmu_debug(du, "Unexpected plane type: %"PRId64, pinfo->val);
+            dp->plane_type = DRMU_PLANE_TYPE_UNKNOWN;
+        }
+        drmu_prop_enum_delete(&etype);
+    }
+
+    props_free(props);
+    return 0;
 }
 
 //----------------------------------------------------------------------------
@@ -3030,11 +3208,11 @@ drmu_ioctl(const drmu_env_t * const du, unsigned long req, void * arg)
 }
 
 static void
-free_planes(drmu_env_t * const du)
+env_free_planes(drmu_env_t * const du)
 {
     uint32_t i;
     for (i = 0; i != du->plane_count; ++i)
-        drmModeFreePlane((drmModePlane*)du->planes[i].plane);
+        plane_uninit(du->planes + i);
     free(du->planes);
     du->plane_count = 0;
     du->planes = NULL;
@@ -3066,93 +3244,37 @@ env_free_crtcs(drmu_env_t * const du)
 static int
 drmu_env_planes_populate(drmu_env_t * const du)
 {
-    int err = EINVAL;
     drmModePlaneResPtr res;
     uint32_t i;
+    int rv = -EINVAL;
 
     if ((res = drmModeGetPlaneResources(du->fd)) == NULL) {
-        err = errno;
-        drmu_err(du, "%s: drmModeGetPlaneResources failed: %s", __func__, strerror(err));
+        rv = -errno;
+        drmu_err(du, "%s: drmModeGetPlaneResources failed: %s", __func__, strerror(-rv));
         goto fail0;
     }
 
     if ((du->planes = calloc(res->count_planes, sizeof(*du->planes))) == NULL) {
-        err = ENOMEM;
-        drmu_err(du, "%s: drmModeGetPlaneResources failed: %s", __func__, strerror(err));
+        rv = -ENOMEM;
+        drmu_err(du, "%s: drmModeGetPlaneResources failed: %s", __func__, strerror(-rv));
         goto fail1;
     }
 
     for (i = 0; i != res->count_planes; ++i) {
-        drmu_plane_t * const dp = du->planes + i;
-        drmu_props_t *props;
-
-        dp->du = du;
-
-        if ((dp->plane = drmModeGetPlane(du->fd, res->planes[i])) == NULL) {
-            err = errno;
-            drmu_err(du, "%s: drmModeGetPlane failed: %s", __func__, strerror(err));
+        if ((rv = plane_init(du, du->planes + i, res->planes[i])) != 0)
             goto fail2;
-        }
-
-        if ((props = props_new(du, dp->plane->plane_id, DRM_MODE_OBJECT_PLANE)) == NULL) {
-            err = errno;
-            drmu_err(du, "%s: drmModeObjectGetProperties failed: %s", __func__, strerror(err));
-            goto fail2;
-        }
-
-#if TRACE_PROP_NEW
-        drmu_info(du, "Plane %d:", i);
-        props_dump(props);
-#endif
-
-        if ((dp->pid.crtc_id = props_name_to_id(props, "CRTC_ID")) == 0 ||
-            (dp->pid.fb_id  = props_name_to_id(props, "FB_ID")) == 0 ||
-            (dp->pid.crtc_h = props_name_to_id(props, "CRTC_H")) == 0 ||
-            (dp->pid.crtc_w = props_name_to_id(props, "CRTC_W")) == 0 ||
-            (dp->pid.crtc_x = props_name_to_id(props, "CRTC_X")) == 0 ||
-            (dp->pid.crtc_y = props_name_to_id(props, "CRTC_Y")) == 0 ||
-            (dp->pid.src_h  = props_name_to_id(props, "SRC_H")) == 0 ||
-            (dp->pid.src_w  = props_name_to_id(props, "SRC_W")) == 0 ||
-            (dp->pid.src_x  = props_name_to_id(props, "SRC_X")) == 0 ||
-            (dp->pid.src_y  = props_name_to_id(props, "SRC_Y")) == 0)
-        {
-            drmu_err(du, "%s: failed to find required id", __func__);
-            props_free(props);
-            goto fail2;
-        }
-
-        dp->pid.alpha            = drmu_prop_range_new(du, props_name_to_id(props, "alpha"));
-        dp->pid.color_encoding   = drmu_prop_enum_new(du, props_name_to_id(props, "COLOR_ENCODING"));
-        dp->pid.color_range      = drmu_prop_enum_new(du, props_name_to_id(props, "COLOR_RANGE"));
-        dp->pid.pixel_blend_mode = drmu_prop_enum_new(du, props_name_to_id(props, "pixel blend mode"));
-        dp->pid.rotation         = drmu_prop_enum_new(du, props_name_to_id(props, "rotation"));
-        dp->pid.chroma_siting_h  = drmu_prop_range_new(du, props_name_to_id(props, "CHROMA_SITING_H"));
-        dp->pid.chroma_siting_v  = drmu_prop_range_new(du, props_name_to_id(props, "CHROMA_SITING_V"));
-
-        dp->rot_vals[DRMU_PLANE_ROTATION_0] = drmu_prop_bitmask_value(dp->pid.rotation, "rotate-0");
-        if (dp->rot_vals[DRMU_PLANE_ROTATION_0]) {
-            // Flips MUST be combined with a rotate
-            if ((dp->rot_vals[DRMU_PLANE_ROTATION_X_FLIP] = drmu_prop_bitmask_value(dp->pid.rotation, "reflect-x")) != 0)
-                dp->rot_vals[DRMU_PLANE_ROTATION_X_FLIP] |= dp->rot_vals[DRMU_PLANE_ROTATION_0];
-            if ((dp->rot_vals[DRMU_PLANE_ROTATION_Y_FLIP] = drmu_prop_bitmask_value(dp->pid.rotation, "reflect-y")) != 0)
-                dp->rot_vals[DRMU_PLANE_ROTATION_Y_FLIP] |= dp->rot_vals[DRMU_PLANE_ROTATION_0];
-        }
-        dp->rot_vals[DRMU_PLANE_ROTATION_180] = drmu_prop_bitmask_value(dp->pid.rotation, "rotate-180");
-        if (!dp->rot_vals[DRMU_PLANE_ROTATION_180] && dp->rot_vals[DRMU_PLANE_ROTATION_X_FLIP] && dp->rot_vals[DRMU_PLANE_ROTATION_Y_FLIP])
-            dp->rot_vals[DRMU_PLANE_ROTATION_180] = dp->rot_vals[DRMU_PLANE_ROTATION_X_FLIP] | dp->rot_vals[DRMU_PLANE_ROTATION_Y_FLIP];
-
-        props_free(props);
         du->plane_count = i + 1;
     }
 
+    drmModeFreePlaneResources(res);
     return 0;
 
 fail2:
-    free_planes(du);
+    env_free_planes(du);
 fail1:
     drmModeFreePlaneResources(res);
 fail0:
-    return -err;
+    return rv;
 }
 
 // Doesn't clean up on error - assumes that env construction will abort and
@@ -3257,7 +3379,7 @@ drmu_env_delete(drmu_env_t ** const ppdu)
 
     if (du->res != NULL)
         drmModeFreeResources(du->res);
-    free_planes(du);
+    env_free_planes(du);
     env_free_conns(du);
     env_free_crtcs(du);
     drmu_bo_env_uninit(&du->boe);

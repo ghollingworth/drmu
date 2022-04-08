@@ -168,7 +168,7 @@ fillpin10(uint8_t * const p, unsigned int dw, unsigned int dh, unsigned int stri
 #define BT2020_RGB_P16(r, g, b) p16val(~0U, BT2020_RGB_Y((r),(g),(b)), BT2020_RGB_Cb((r),(g),(b))+0x8000+0.5, BT2020_RGB_Cr((r),(g),(b))+0x8000+0.5)
 
 static int
-color_siting(drmu_atomic_t * const da, drmu_crtc_t * const dc,
+color_siting(drmu_atomic_t * const da, drmu_output_t * const dout,
              uint8_t * const p16, unsigned int dw, unsigned int dh, unsigned int p16_stride,
              const bool dofrac)
 {
@@ -214,7 +214,7 @@ color_siting(drmu_atomic_t * const da, drmu_crtc_t * const dc,
     plane16_fill(p16pos(s16, s16_stride, (w / 2 - 1), 0), 2, h, s16_stride, fg);
 
     for (i = 0; i != 7; ++i) {
-        if ((planes[i] = drmu_plane_new_find(dc, fmt)) == NULL) {
+        if ((planes[i] = drmu_output_plane_ref_other(dout)) == NULL) {
             fprintf(stderr, "Color siting test needs 8 planes, only got %d\nMaybe don't run from X?\n", i + 1);
             rv = -ENOENT;
             goto fail;
@@ -258,7 +258,7 @@ fail:
     // Would be "better" to delete planes at the end, but if we never alloc
     // another then this is, in fact, safe (nasty though)
     for (i = 0; i != 7; ++i)
-        drmu_plane_delete(planes + i);
+        drmu_plane_unref(planes + i);
     drmu_fb_unref(&fb);
     free(s16);
     return rv;
@@ -513,7 +513,7 @@ int main(int argc, char *argv[])
     }
     p16_stride = dw * 8;
 
-    if ((p1 = drmu_plane_new_find(dc, p1fmt)) == NULL) {
+    if ((p1 = drmu_output_plane_ref_primary(dout)) == NULL) {
         fprintf(stderr, "Cannot find plane for %s\n", drmu_log_fourcc(p1fmt));
         goto fail;
     }
@@ -534,7 +534,7 @@ int main(int argc, char *argv[])
     else if (grey_only)
         fillgradgrey10(p16, dw, dh, p16_stride, is_yuv);
     else if (test_siting) {
-        if (color_siting(da, dc, p16, dw, dh, p16_stride, dofrac))
+        if (color_siting(da, dout, p16, dw, dh, p16_stride, dofrac))
             goto fail;
     } else if (!fill_solid)
         fillgraduated10(p16, dw, dh, p16_stride, is_yuv);
@@ -584,8 +584,8 @@ int main(int argc, char *argv[])
 fail:
     drmu_atomic_unref(&da);
     drmu_fb_unref(&fb1);
-    drmu_plane_delete(&p1);
-    drmu_crtc_delete(&dc);
+    drmu_plane_unref(&p1);
+    drmu_output_unref(&dout);
     drmu_env_delete(&du);
     return 0;
 }

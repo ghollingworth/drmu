@@ -276,12 +276,6 @@ void drmu_crtc_delete(drmu_crtc_t ** ppdc);
 drmu_env_t * drmu_crtc_env(const drmu_crtc_t * const dc);
 uint32_t drmu_crtc_id(const drmu_crtc_t * const dc);
 int drmu_crtc_idx(const drmu_crtc_t * const dc);
-uint32_t drmu_crtc_x(const drmu_crtc_t * const dc);
-uint32_t drmu_crtc_y(const drmu_crtc_t * const dc);
-uint32_t drmu_crtc_width(const drmu_crtc_t * const dc);
-uint32_t drmu_crtc_height(const drmu_crtc_t * const dc);
-drmu_ufrac_t drmu_crtc_sar(const drmu_crtc_t * const dc);
-void drmu_crtc_max_bpc_allow(drmu_crtc_t * const dc, const bool max_bpc_allowed);
 
 drmu_crtc_t * drmu_crtc_find_id(drmu_env_t * const du, const uint32_t crtc_id);
 
@@ -289,6 +283,8 @@ typedef struct drmu_mode_pick_simple_params_s {
     unsigned int width;
     unsigned int height;
     unsigned int hz_x_1000;  // Refresh rate * 1000 i.e. 50Hz = 50000
+    drmu_ufrac_t par;  // Picture Aspect Ratio (0:0 if unknown)
+    drmu_ufrac_t sar;  // Sample Aspect Ratio
     uint32_t type;
     uint32_t flags;
 } drmu_mode_simple_params_t;
@@ -335,8 +331,6 @@ drmu_conn_t * drmu_conn_find_n(drmu_env_t * const du, const unsigned int n);
 
 uint32_t drmu_plane_id(const drmu_plane_t * const dp);
 const uint32_t * drmu_plane_formats(const drmu_plane_t * const dp, unsigned int * const pCount);
-void drmu_plane_delete(drmu_plane_t ** const ppdp);
-drmu_plane_t * drmu_plane_new_find(drmu_crtc_t * const dc, const uint32_t fmt);
 
 // Alpha: -1 = no not set, 0 = transparent, 0xffff = opaque
 #define DRMU_PLANE_ALPHA_UNSET                  (-1)
@@ -379,6 +373,26 @@ int drmu_atomic_plane_add_chroma_siting(struct drmu_atomic_s * const da, const d
 #define DRMU_PLANE_RANGE_FULL                   "YCbCr full range"
 #define DRMU_PLANE_RANGE_LIMITED                "YCbCr limited range"
 int drmu_atomic_plane_fb_set(struct drmu_atomic_s * const da, drmu_plane_t * const dp, drmu_fb_t * const dfb, const drmu_rect_t pos);
+
+// Unref a plane
+void drmu_plane_unref(drmu_plane_t ** const ppdp);
+
+// Ref a plane - expects it is already associated
+drmu_plane_t * drmu_plane_ref(drmu_plane_t * const dp);
+
+// Associate a plane with a crtc and ref it
+// Returns -EBUSY if plane already associated
+int drmu_plane_ref_crtc(drmu_plane_t * const dp, drmu_crtc_t * const dc);
+
+#define DRMU_PLANE_TYPE_CURSOR  4
+#define DRMU_PLANE_TYPE_PRIMARY 2
+#define DRMU_PLANE_TYPE_OVERLAY 1
+#define DRMU_PLANE_TYPE_UNKNOWN 0
+
+// Find a "free" plane of the given type. Types can be ORed
+// Does not ref
+drmu_plane_t * drmu_plane_new_find_type(drmu_crtc_t * const dc, const unsigned int req_type);
+
 
 // Env
 struct drmu_log_env_s;

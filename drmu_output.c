@@ -33,6 +33,28 @@ struct drmu_output_s {
     struct hdr_output_metadata hdr_metadata;
 };
 
+drmu_plane_t *
+drmu_output_plane_ref_primary(drmu_output_t * const dout)
+{
+    drmu_plane_t * const dp = drmu_plane_new_find_type(dout->dc, DRMU_PLANE_TYPE_PRIMARY);
+
+    if (dp == NULL || drmu_plane_ref_crtc(dp, dout->dc) != 0)
+        return NULL;
+
+    return dp;
+}
+
+drmu_plane_t *
+drmu_output_plane_ref_other(drmu_output_t * const dout)
+{
+    drmu_plane_t *const dp = drmu_plane_new_find_type(dout->dc, DRMU_PLANE_TYPE_CURSOR | DRMU_PLANE_TYPE_OVERLAY);
+
+    if (dp == NULL || drmu_plane_ref_crtc(dp, dout->dc) != 0)
+        return NULL;
+
+    return dp;
+}
+
 int
 drmu_atomic_add_output_props(drmu_atomic_t * const da, drmu_output_t * const dout)
 {
@@ -223,6 +245,8 @@ drmu_output_add_output(drmu_output_t * const dout, const char * const conn_name)
     dout->dns[dout->conn_n++] = dn;
     dout->dc = dc_t;
 
+    dout->mode_params = drmu_crtc_mode_simple_params(dout->dc);
+
     return 0;
 }
 
@@ -266,6 +290,7 @@ drmu_output_new(drmu_env_t * const du)
     }
 
     dout->du = du;
+    dout->mode_id = -1;
     return dout;
 }
 

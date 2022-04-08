@@ -153,7 +153,7 @@ int drmprime_out_modeset(drmprime_out_env_t * de, int w, int h, const AVRational
 
 void drmprime_out_delete(drmprime_out_env_t *de)
 {
-    drmu_plane_delete(&de->dp);
+    drmu_plane_unref(&de->dp);
     drmu_output_unref(&de->dout);
     drmu_env_delete(&de->du);
     free(de);
@@ -204,9 +204,8 @@ drmprime_out_env_t* drmprime_out_new()
     if ((de->pic_pool = drmu_pool_new(de->du, 5)) == NULL)
         goto fail;
 
-    // **** Plane selection needs noticable improvement
     // This wants to be the primary
-    if ((de->dp = drmu_plane_new_find(drmu_output_crtc(de->dout), DRM_FORMAT_NV12)) == NULL)
+    if ((de->dp = drmu_output_plane_ref_primary(de->dout)) == NULL)
         goto fail;
 
     return de;

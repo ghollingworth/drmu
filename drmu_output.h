@@ -10,6 +10,9 @@ extern "C" {
 struct drmu_output_s;
 typedef struct drmu_output_s drmu_output_t;
 
+drmu_plane_t * drmu_output_plane_ref_primary(drmu_output_t * const dout);
+drmu_plane_t * drmu_output_plane_ref_other(drmu_output_t * const dout);
+
 // Add all props accumulated on the output to the atomic
 int drmu_atomic_add_output_props(drmu_atomic_t * const da, drmu_output_t * const dout);
 

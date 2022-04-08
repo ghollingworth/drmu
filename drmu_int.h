@@ -101,34 +101,6 @@ typedef struct drmu_pool_s {
     drmu_fb_list_t free_fbs;
 } drmu_pool_t;
 
-typedef struct drmu_plane_s {
-    struct drmu_env_s * du;
-    struct drmu_crtc_s * dc;    // NULL if not in use
-    const drmModePlane * plane;
-
-    struct {
-        uint32_t crtc_id;
-        uint32_t fb_id;
-        uint32_t crtc_h;
-        uint32_t crtc_w;
-        uint32_t crtc_x;
-        uint32_t crtc_y;
-        uint32_t src_h;
-        uint32_t src_w;
-        uint32_t src_x;
-        uint32_t src_y;
-        drmu_prop_range_t * alpha;
-        drmu_prop_enum_t * color_encoding;
-        drmu_prop_enum_t * color_range;
-        drmu_prop_enum_t * pixel_blend_mode;
-        drmu_prop_bitmask_t * rotation;
-        drmu_prop_range_t * chroma_siting_h;
-        drmu_prop_range_t * chroma_siting_v;
-    } pid;
-    uint64_t rot_vals[8];
-
-} drmu_plane_t;
-
 
 typedef struct drmu_atomic_q_s {
     pthread_mutex_t lock;

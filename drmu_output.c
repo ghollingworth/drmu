@@ -199,6 +199,22 @@ drmu_output_max_bpc_allow(drmu_output_t * const dout, const bool allow)
     return 0;
 }
 
+static int
+check_conns_size(drmu_output_t * const dout)
+{
+    if (dout->conn_n >= dout->conn_size) {
+        unsigned int n = !dout->conn_n ? 4 : dout->conn_n * 2;
+        drmu_conn_t ** dns = realloc(dout->dns, sizeof(*dout->dns) * n);
+        if (dns == NULL) {
+            drmu_err(dout->du, "Failed conn array realloc");
+            return -ENOMEM;
+        }
+        dout->dns = dns;
+        dout->conn_size = n;
+    }
+    return 0;
+}
+
 int
 drmu_output_add_output(drmu_output_t * const dout, const char * const conn_name)
 {
@@ -209,6 +225,7 @@ drmu_output_add_output(drmu_output_t * const dout, const char * const conn_name)
     drmu_conn_t * dn_t;
     drmu_crtc_t * dc_t = NULL;
     uint32_t crtc_id;
+    int rv;
 
     for (i = 0; (dn_t = drmu_conn_find_n(du, i)) != NULL; ++i) {
         if (!drmu_conn_is_output(dn_t))
@@ -231,22 +248,149 @@ drmu_output_add_output(drmu_output_t * const dout, const char * const conn_name)
         return -EINVAL;
     }
 
-    if (dout->conn_n >= dout->conn_size) {
-        unsigned int n = !dout->conn_n ? 4 : dout->conn_n * 2;
-        drmu_conn_t ** dns = realloc(dout->dns, sizeof(*dout->dns) * n);
-        if (dns == NULL) {
-            drmu_err(du, "Failed conn array realloc");
-            return -ENOMEM;
-        }
-        dout->dns = dns;
-        dout->conn_size = n;
-    }
+    if ((rv = check_conns_size(dout)) != 0)
+        return rv;
 
     dout->dns[dout->conn_n++] = dn;
     dout->dc = dc_t;
 
     dout->mode_params = drmu_crtc_mode_simple_params(dout->dc);
 
+    return 0;
+}
+
+struct drm_mode_modeinfo
+modeinfo_fake(unsigned int w, unsigned int h)
+{
+    return (struct drm_mode_modeinfo){
+        .clock = (h + 30)*(w + 20)*60,
+        .hdisplay = w,
+        .hsync_start = w + 10,
+        .hsync_end = w + 20,
+        .htotal = w + 30,
+        .hskew = 0,
+        .vdisplay = h,
+        .vsync_start = h + 10,
+        .vsync_end = h + 12,
+        .vtotal = h + 20,
+        .vscan = 0,
+        .vrefresh = 60,
+        .type = DRM_MODE_TYPE_USERDEF,
+        .flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC,
+        .name = {"fake"},
+    };
+}
+
+static int
+try_conn_crtc(drmu_env_t * du, drmu_conn_t * dn, drmu_crtc_t * dc)
+{
+    int rv;
+
+#if 1
+    const struct drm_mode_modeinfo test_mode = modeinfo_fake(128,128);
+#else
+    static const struct drm_mode_modeinfo test_mode = {
+        .clock = 25175,
+        .hdisplay = 640,
+        .hsync_start = 656,
+        .hsync_end = 752,
+        .htotal = 800,
+        .hskew = 0,
+        .vdisplay = 480,
+        .vsync_start = 490,
+        .vsync_end = 492,
+        .vtotal = 525,
+        .vscan = 0,
+        .vrefresh = 60,
+        .flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC,
+        .name = {"640x480-60"},
+    };
+#endif
+
+    drmu_atomic_t * da = drmu_atomic_new(du);
+
+    if (!da)
+        return -ENOMEM;
+
+    if ((rv = drmu_atomic_conn_add_crtc(da, dn, dc)) != 0) {
+        drmu_warn(du, "Failed to add writeback connector to crtc: %s", strerror(-rv));
+        goto fail;
+    }
+    if ((rv = drmu_atomic_crtc_add_modeinfo(da, dc, &test_mode)) != 0) {
+        drmu_warn(du, "Failed to add modeinfo: %s", strerror(-rv));
+        goto fail;
+    }
+
+    if ((rv = drmu_atomic_crtc_add_active(da, dc, 1)) != 0) {
+        drmu_warn(du, "Failed to add active to crtc: %s", strerror(-rv));
+        goto fail;
+    }
+
+    if ((rv = drmu_atomic_commit(da, DRM_MODE_ATOMIC_TEST_ONLY | DRM_MODE_ATOMIC_ALLOW_MODESET)) != 0) {
+        drmu_warn(du, "Failed test commit of writeback connector to crtc: %s", strerror(-rv));
+        goto fail;
+    }
+
+    drmu_atomic_unref(&da);
+    return 0;
+
+fail:
+    drmu_atomic_unref(&da);
+    return rv;
+}
+
+int
+drmu_output_add_writeback(drmu_output_t * const dout)
+{
+    drmu_env_t * const du = dout->du;
+    drmu_conn_t * dn = NULL;
+    drmu_crtc_t * dc = NULL;
+    drmu_conn_t * dn_t;
+    int rv;
+    uint32_t possible_crtcs;
+
+    for (unsigned int i = 0; (dn_t = drmu_conn_find_n(du, i)) != NULL; ++i) {
+        drmu_info(du, "%d: try %s", i, drmu_conn_name(dn_t));
+        if (!drmu_conn_is_writeback(dn_t))
+            continue;
+        dn = dn_t;
+        break;
+    }
+
+    if (!dn) {
+        drmu_err(du, "no writeback conn found");
+        return -ENOENT;
+    }
+
+    possible_crtcs = drmu_conn_possible_crtcs(dn);
+
+    for (unsigned int i = 0; possible_crtcs != 0; ++i, possible_crtcs >>= 1) {
+        drmu_crtc_t *dc_t;
+
+        if ((possible_crtcs & 1) == 0)
+            continue;
+
+        drmu_info(du, "try Crtc %d", i);
+
+        if ((dc_t = drmu_crtc_find_n(du, i)) == NULL)
+            break;
+
+        if (try_conn_crtc(du, dn, dc_t) == 0) {
+            dc = dc_t;
+            break;
+        }
+    }
+
+    if (!dc) {
+        drmu_err(du, "No crtc for writeback found");
+        return -ENOENT;
+    }
+
+    if ((rv = check_conns_size(dout)) != 0)
+        return rv;
+
+    dout->dns[dout->conn_n++] = dn;
+    dout->dc = dc;
     return 0;
 }
 

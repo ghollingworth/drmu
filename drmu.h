@@ -278,6 +278,7 @@ uint32_t drmu_crtc_id(const drmu_crtc_t * const dc);
 int drmu_crtc_idx(const drmu_crtc_t * const dc);
 
 drmu_crtc_t * drmu_crtc_find_id(drmu_env_t * const du, const uint32_t crtc_id);
+drmu_crtc_t * drmu_crtc_find_n(drmu_env_t * const du, const unsigned int n);
 
 typedef struct drmu_mode_pick_simple_params_s {
     unsigned int width;
@@ -294,6 +295,7 @@ const struct drm_mode_modeinfo * drmu_crtc_modeinfo(const drmu_crtc_t * const dc
 drmu_mode_simple_params_t drmu_crtc_mode_simple_params(const drmu_crtc_t * const dc);
 
 int drmu_atomic_crtc_add_modeinfo(struct drmu_atomic_s * const da, drmu_crtc_t * const dc, const struct drm_mode_modeinfo * const modeinfo);
+int drmu_atomic_crtc_add_active(struct drmu_atomic_s * const da, drmu_crtc_t * const dc, unsigned int val);
 
 // Connector
 
@@ -310,6 +312,9 @@ int drmu_atomic_conn_colorspace_set(struct drmu_atomic_s * const da, drmu_conn_t
 #define DRMU_BROADCAST_RGB_LIMITED_16_235  "Limited 16:235"
 int drmu_atomic_conn_broadcast_rgb_set(struct drmu_atomic_s * const da, drmu_conn_t * const dn, const char * bcrgb);
 
+// Add crtc id
+int drmu_atomic_conn_add_crtc(struct drmu_atomic_s * const da, drmu_conn_t * const dn, drmu_crtc_t * const dc);
+
 const struct drm_mode_modeinfo * drmu_conn_modeinfo(const drmu_conn_t * const dn, const int mode_id);
 drmu_mode_simple_params_t drmu_conn_mode_simple_params(const drmu_conn_t * const dn, const int mode_id);
 
@@ -317,6 +322,9 @@ drmu_mode_simple_params_t drmu_conn_mode_simple_params(const drmu_conn_t * const
 // has no way of guessing if the atomic from the set was ever committed
 // successfully
 uint32_t drmu_conn_crtc_id_get(const drmu_conn_t * const dn);
+
+// Bitmask of CRTCs that might be able to use this Conn
+uint32_t drmu_conn_possible_crtcs(const drmu_conn_t * const dn);
 
 bool drmu_conn_is_output(const drmu_conn_t * const dn);
 bool drmu_conn_is_writeback(const drmu_conn_t * const dn);

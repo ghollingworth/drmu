@@ -1769,9 +1769,8 @@ typedef struct drmu_crtc_s {
     struct drm_mode_crtc crtc;
 
     struct {
-        // crtc
+        drmu_prop_range_t * active;
         uint32_t mode_id;
-        // connection
     } pid;
 
     drmu_blob_t * mode_id_blob;
@@ -1906,6 +1905,7 @@ crtc_init(drmu_env_t * const du, drmu_crtc_t * const dc, const unsigned int idx,
         props_dump(props);
 #endif
         dc->pid.mode_id = props_name_to_id(props, "MODE_ID");
+        dc->pid.active = drmu_prop_range_new(du, props_name_to_id(props, "ACTIVE"));
 
         props_free(props);
     }
@@ -2087,6 +2087,15 @@ drmu_crtc_find_id(drmu_env_t * const du, const uint32_t crtc_id)
     return NULL;
 }
 
+// Retrieve the the n-th conn
+// Use for iteration
+// Returns NULL when none left
+drmu_crtc_t *
+drmu_crtc_find_n(drmu_env_t * const du, const unsigned int n)
+{
+    return n >= du->crtc_count ? NULL : du->crtcs + n;
+}
+
 const struct drm_mode_modeinfo *
 drmu_crtc_modeinfo(const drmu_crtc_t * const dc)
 {
@@ -2116,6 +2125,11 @@ drmu_atomic_crtc_add_modeinfo(struct drmu_atomic_s * const da, drmu_crtc_t * con
     return drmu_atomic_add_prop_blob(da, dc->crtc.crtc_id, dc->pid.mode_id, dc->mode_id_blob);
 }
 
+int
+drmu_atomic_crtc_add_active(struct drmu_atomic_s * const da, drmu_crtc_t * const dc, unsigned int val)
+{
+    return drmu_atomic_add_prop_range(da, dc->crtc.crtc_id, dc->pid.active, val);
+}
 
 // Get a CRTC attached (via encoder) to a connector
 // Not exactly hi-grade guesswork but it does the job for something with a
@@ -2252,7 +2266,11 @@ struct drmu_conn_s {
     unsigned int conn_idx;
     struct drm_mode_get_connector conn;
     unsigned int modes_size;
+    unsigned int enc_ids_size;
     struct drm_mode_modeinfo * modes;
+    uint32_t * enc_ids;
+
+    uint32_t avail_crtc_mask;
 
     struct {
         drmu_prop_object_t * crtc_id;
@@ -2320,6 +2338,12 @@ drmu_atomic_conn_broadcast_rgb_set(drmu_atomic_t * const da, drmu_conn_t * const
     return drmu_atomic_add_prop_enum(da, dn->conn.connector_id, dn->pid.broadcast_rgb, bcrgb);
 }
 
+int
+drmu_atomic_conn_add_crtc(drmu_atomic_t * const da, drmu_conn_t * const dn, drmu_crtc_t * const dc)
+{
+    return drmu_atomic_add_prop_object(da, dn->pid.crtc_id, drmu_crtc_id(dc));
+}
+
 const struct drm_mode_modeinfo *
 drmu_conn_modeinfo(const drmu_conn_t * const dn, const int mode_id)
 {
@@ -2358,6 +2382,12 @@ drmu_conn_crtc_id_get(const drmu_conn_t * const dn)
     return drmu_prop_object_value(dn->pid.crtc_id);
 }
 
+uint32_t
+drmu_conn_possible_crtcs(const drmu_conn_t * const dn)
+{
+    return dn->avail_crtc_mask;
+}
+
 unsigned int
 drmu_conn_idx_get(const drmu_conn_t * const dn)
 {
@@ -2385,9 +2415,11 @@ conn_uninit(drmu_conn_t * const dn)
     drmu_blob_unref(&dn->hdr_metadata_blob);
 
     free(dn->modes);
+    free(dn->enc_ids);
     dn->modes = NULL;
+    dn->enc_ids = NULL;
     dn->modes_size = 0;
-
+    dn->enc_ids_size = 0;
 }
 
 // Assumes zeroed before entry
@@ -2397,6 +2429,7 @@ conn_init(drmu_env_t * const du, drmu_conn_t * const dn, unsigned int conn_idx, 
     int rv;
     drmu_props_t * props;
     uint32_t modes_req = 0;
+    uint32_t encs_req = 0;
 
     dn->du = du;
     dn->conn_idx = conn_idx;
@@ -2417,13 +2450,25 @@ conn_init(drmu_env_t * const du, drmu_conn_t * const dn, unsigned int conn_idx, 
         dn->conn.modes_ptr = (uintptr_t)dn->modes;
         dn->conn.count_modes = modes_req;
 
+        if (encs_req > dn->enc_ids_size) {
+            free(dn->enc_ids);
+            if ((dn->enc_ids = malloc(encs_req * sizeof(*dn->enc_ids))) == NULL) {
+                drmu_err(du, "Failed to alloc encs array");
+                goto fail;
+            }
+            dn->enc_ids_size = encs_req;
+        }
+        dn->conn.encoders_ptr = (uintptr_t)dn->enc_ids;
+        dn->conn.count_encoders = encs_req;
+
         if ((rv = drmu_ioctl(du, DRM_IOCTL_MODE_GETCONNECTOR, &dn->conn)) != 0) {
             drmu_err(du, "Get connector id %d failed: %s", dn->conn.connector_id, strerror(-rv));
             goto fail;
         }
         modes_req = dn->conn.count_modes;
+        encs_req = dn->conn.count_encoders;
 
-    } while (dn->modes_size < modes_req);
+    } while (dn->modes_size < modes_req || dn->enc_ids_size < encs_req);
 
     dn->probed = true;
 
@@ -2436,9 +2481,22 @@ conn_init(drmu_env_t * const du, drmu_conn_t * const dn, unsigned int conn_idx, 
 
     props = props_new(du, dn->conn.connector_id, DRM_MODE_OBJECT_CONNECTOR);
 
+    // Spin over encoders to create a crtc mask
+    dn->avail_crtc_mask = 0;
+    for (unsigned int i = 0; i != dn->conn.count_encoders; ++i) {
+        struct drm_mode_get_encoder enc = {.encoder_id = dn->enc_ids[i]};
+        if ((rv = drmu_ioctl(du, DRM_IOCTL_MODE_GETENCODER, &enc)) != 0) {
+            drmu_warn(du, "Failed to get encoder: id: %#x", enc.encoder_id);
+            continue;
+        }
+        dn->avail_crtc_mask |= enc.possible_crtcs;
+    }
+
     if (props != NULL) {
 #if TRACE_PROP_NEW || 1
-        drmu_info(du, "Connector id=%d, type=%d.%d:", dn->conn.connector_id, dn->conn.connector_type, dn->conn.connector_type_id);
+        drmu_info(du, "Connector id=%d, type=%d.%d (%s), crtc_mask=%#x:",
+                  dn->conn.connector_id, dn->conn.connector_type, dn->conn.connector_type_id, drmu_conn_name(dn),
+                  dn->avail_crtc_mask);
         props_dump(props);
 #endif
         dn->pid.crtc_id             = drmu_prop_object_new_propinfo(du, dn->conn.connector_id, props_name_to_propinfo(props, "CRTC_ID"));
@@ -3298,7 +3356,7 @@ env_conn_populate(drmu_env_t * const du, unsigned int n, const uint32_t * const 
     for (i = 0; i != n; ++i) {
         if ((rv = conn_init(du, du->conns + i, i, ids[i])) != 0)
             return rv;
-        du->conn_count = i;
+        du->conn_count = i + 1;
     }
 
     return 0;
@@ -3323,7 +3381,7 @@ env_crtc_populate(drmu_env_t * const du, unsigned int n, const uint32_t * const 
     for (i = 0; i != n; ++i) {
         if ((rv = crtc_init(du, du->crtcs + i, i, ids[i])) != 0)
             return rv;
-        du->crtc_count = i;
+        du->crtc_count = i + 1;
     }
 
     return 0;

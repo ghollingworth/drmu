@@ -457,6 +457,15 @@ int main(int argc, char *argv[])
     dc = drmu_output_crtc(dout);
     dn = drmu_output_conn(dout, 0);
 
+    {
+        drmu_output_t * dout2 = drmu_output_new(du);
+        if (drmu_output_add_writeback(dout2) != 0) {
+            drmu_err(du, "Failed to add writeback");
+            goto fail;
+        }
+        drmu_output_unref(&dout2);
+    }
+
     drmu_output_max_bpc_allow(dout, hi_bpc);
 
     if (!mode_req) {

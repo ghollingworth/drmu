@@ -41,7 +41,11 @@ int drmu_output_max_bpc_allow(drmu_output_t * const dout, const bool allow);
 // If != NULL then 1st conn with prefix-matching name is used
 int drmu_output_add_output(drmu_output_t * const dout, const char * const conn_name);
 
-// Add a writeback connector to existing crtc
+// Set writeback fb on output
+int drmu_atomic_output_add_writeback_fb(drmu_atomic_t * const da_req, drmu_output_t * const dout,
+                                    drmu_fb_t * const dfb);
+
+// Add a writeback connector & find a crtc for it
 int drmu_output_add_writeback(drmu_output_t * const dout);
 
 // Conn & CRTC for when output isn't fine grained enough

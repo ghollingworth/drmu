@@ -340,6 +340,62 @@ fail:
 }
 
 int
+drmu_atomic_output_add_writeback_fb(drmu_atomic_t * const da_req, drmu_output_t * const dout,
+                                    drmu_fb_t * const dfb)
+{
+    drmu_env_t * const du = dout->du;
+    drmu_atomic_t * da = drmu_atomic_new(drmu_atomic_env(da_req));
+    drmu_fence_t * fence = NULL;
+    bool fence_set = false;
+    int rv = -ENOMEM;
+    struct drm_mode_modeinfo mode = modeinfo_fake(drmu_fb_width(dfb), drmu_fb_height(dfb));
+    drmu_conn_t * const dn = dout->dns[0];
+
+    if (da == NULL)
+        return -ENOMEM;
+
+    if ((fence = drmu_fence_new(du)) == NULL)
+        goto fail;
+
+    if ((rv = drmu_atomic_conn_add_writeback_out_fence(da, dn, fence)) != 0) {
+        drmu_err(du, "Failed to add fence to conn");
+        goto fail;
+    }
+    if ((rv = drmu_atomic_conn_add_writeback_fb(da, dn, dfb)) != 0) {
+        drmu_err(du, "Failed to add FB to conn");
+        goto fail;
+    }
+    if ((rv = drmu_fb_fence_set(dfb, fence)) != 0) {
+        drmu_err(du, "Failed to add FB to conn");
+        goto fail;
+    }
+    drmu_fence_unref(&fence);
+    fence_set = true;
+
+    if ((rv = drmu_atomic_crtc_add_modeinfo(da, dout->dc, &mode)) != 0) {
+        drmu_err(du, "Failed to add modeinfo to CRTC");
+        goto fail;
+    }
+    if ((rv = drmu_atomic_conn_add_crtc(da, dn, dout->dc)) != 0) {
+        drmu_err(du, "Failed to add CRTC to Conn");
+        goto fail;
+    }
+    if ((rv = drmu_atomic_crtc_add_active(da, dout->dc, 1)) != 0) {
+        drmu_err(du, "Failed to add Active to Conn");
+        goto fail;
+    }
+
+    return drmu_atomic_merge(da_req, &da);
+
+fail:
+    if (fence_set)
+        drmu_fb_fence_unset(dfb);
+    drmu_fence_unref(&fence);
+    drmu_atomic_unref(&da);
+    return rv;
+}
+
+int
 drmu_output_add_writeback(drmu_output_t * const dout)
 {
     drmu_env_t * const du = dout->du;

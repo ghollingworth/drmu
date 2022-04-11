@@ -314,6 +314,7 @@ int main(int argc, char *argv[])
     drmu_conn_t * dn = NULL;
     drmu_plane_t * p1 = NULL;
     drmu_fb_t * fb1 = NULL;
+    drmu_fb_t * fb_out = NULL;
     drmu_atomic_t * da = NULL;
     uint32_t p1fmt = DRM_FORMAT_ARGB2101010;
     uint64_t p1mod = DRM_FORMAT_MOD_INVALID;
@@ -332,13 +333,15 @@ int main(int argc, char *argv[])
     bool mode_req = false;
     bool hi_bpc = true;
     bool dofrac = false;
+    bool try_writeback = false;
     int verbose = 0;
     int c;
     uint64_t fillval = p16val(~0UL, 0x8000, 0x8000, 0x8000);
     uint8_t *p16 = NULL;
     unsigned int p16_stride = 0;
+    int rv;
 
-    while ((c = getopt(argc, argv, "8c:e:f:Fgpr:R:svy")) != -1) {
+    while ((c = getopt(argc, argv, "8c:e:f:Fgpr:R:svwy")) != -1) {
         switch (c) {
             case 'c':
                 colorspace = optarg;
@@ -410,6 +413,9 @@ int main(int argc, char *argv[])
             case '8':
                 hi_bpc = false;
                 break;
+            case 'w':
+                try_writeback = true;
+                break;
             case 'v':
                 ++verbose;
                 break;
@@ -452,23 +458,38 @@ int main(int argc, char *argv[])
 
     if ((dout = drmu_output_new(du)) == NULL)
         goto fail;
-    if (drmu_output_add_output(dout, NULL) != 0)
-        goto fail;
-    dc = drmu_output_crtc(dout);
-    dn = drmu_output_conn(dout, 0);
-
-    {
-        drmu_output_t * dout2 = drmu_output_new(du);
-        if (drmu_output_add_writeback(dout2) != 0) {
+    if (try_writeback) {
+        if (drmu_output_add_writeback(dout) != 0) {
             drmu_err(du, "Failed to add writeback");
             goto fail;
         }
-        drmu_output_unref(&dout2);
     }
+    else {
+        if (drmu_output_add_output(dout, NULL) != 0)
+            goto fail;
+    }
+    dc = drmu_output_crtc(dout);
+    dn = drmu_output_conn(dout, 0);
 
     drmu_output_max_bpc_allow(dout, hi_bpc);
 
-    if (!mode_req) {
+    if (try_writeback) {
+        if (!dw || !dh) {
+            dw = 1920;
+            dh = 1080;
+        }
+        printf("Try writeback %dx%d", dw, dh);
+
+        if ((fb_out = drmu_fb_new_dumb(du, dw, dh, DRM_FORMAT_ARGB8888)) == NULL) {
+            printf("Failed to create fb-out");
+            goto fail;
+        }
+        if (drmu_atomic_output_add_writeback_fb(da, dout, fb_out) != 0) {
+            printf("Failed to add writeback fb");
+            goto fail;
+        }
+    }
+    else if (!mode_req) {
         const drmu_mode_simple_params_t * const sp = drmu_output_mode_simple_params(dout);
         dw = sp->width;
         dh = sp->height;
@@ -586,12 +607,39 @@ int main(int argc, char *argv[])
     if (drmu_atomic_conn_hi_bpc_set(da, dn, hi_bpc) != 0)
         fprintf(stderr, "Failed hi bpc set\n");
 
-    drmu_atomic_queue(&da);
+    if (try_writeback) {
+        if (drmu_atomic_commit(da, DRM_MODE_ATOMIC_ALLOW_MODESET) != 0) {
+            fprintf(stderr, "Failed to commit writeback\n");
+            goto fail;
+        }
+        rv = drmu_fence_wait(drmu_fb_fence_get(fb_out), 1000);
+        if (rv == 1) {
+            printf("Waited OK for writeback\n");
+        }
+        else if (rv == 0) {
+            printf("Timeout for writeback\n");
+        }
+        else {
+            fprintf(stderr, "Failed to wait for writeback: %s\n", strerror(-rv));
+            goto fail;
+        }
+        drmu_fb_fence_unset(fb_out);
 
-    getchar();
+        {
+            FILE * f = fopen("wb.rgb", "wb");
+            fwrite(drmu_fb_data(fb_out, 0), drmu_fb_pitch(fb_out, 0), drmu_fb_height(fb_out), f);
+            fclose(f);
+        }
+        // *** Test fb contents
+    }
+    else {
+        drmu_atomic_queue(&da);
+        getchar();
+    }
 
 fail:
     drmu_atomic_unref(&da);
+    drmu_fb_unref(&fb_out);
     drmu_fb_unref(&fb1);
     drmu_plane_unref(&p1);
     drmu_output_unref(&dout);

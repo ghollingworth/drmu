@@ -78,6 +78,8 @@ typedef struct drmu_fb_s {
 
     void * on_delete_v;
     drmu_fb_on_delete_fn on_delete_fn;
+
+    drmu_fence_t * fence;
 } drmu_fb_t;
 
 typedef struct drmu_fb_list_s {

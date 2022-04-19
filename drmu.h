@@ -19,9 +19,6 @@ typedef struct drmu_prop_enum_s drmu_prop_enum_t;
 struct drmu_prop_range_s;
 typedef struct drmu_prop_range_s drmu_prop_range_t;
 
-struct drmu_fence_s;
-typedef struct drmu_fence_s drmu_fence_t;
-
 struct drmu_bo_s;
 typedef struct drmu_bo_s drmu_bo_t;
 struct drmu_bo_env_s;
@@ -174,14 +171,6 @@ uint32_t drmu_prop_range_id(const drmu_prop_range_t * const pra);
 drmu_prop_range_t * drmu_prop_range_new(drmu_env_t * const du, const uint32_t id);
 int drmu_atomic_add_prop_range(struct drmu_atomic_s * const da, const uint32_t obj_id, const drmu_prop_range_t * const pra, const uint64_t x);
 
-// Fence
-
-int drmu_fence_wait(drmu_fence_t * const fence, const int timeout_ms);
-void drmu_fence_unref(drmu_fence_t ** const ppfence);
-drmu_fence_t * drmu_fence_ref(drmu_fence_t * const fence);
-drmu_fence_t * drmu_fence_new(drmu_env_t * const du);
-int drmu_atomic_add_prop_fence(struct drmu_atomic_s * const da, const uint32_t obj_id, const uint32_t prop_id, drmu_fence_t * const fence);
-
 // BO
 
 struct drm_mode_create_dumb;
@@ -262,16 +251,12 @@ const struct drmu_format_info_s * drmu_fb_format_info_get(const drmu_fb_t * cons
 void drmu_fb_hdr_metadata_set(drmu_fb_t *const dfb, const struct hdr_output_metadata * meta);
 int drmu_fb_int_make(drmu_fb_t *const dfb);
 
-// Writeback fence
-// Must be unset before set again
-// (This is as a handy hint that you must wait for the previous fence
-// to go ready before you set a new one)
-int drmu_fb_fence_set(drmu_fb_t * const dfb, drmu_fence_t * const fence);
-
-int drmu_fb_fence_unset(drmu_fb_t * const dfb);
-
-drmu_fence_t * drmu_fb_fence_get(const drmu_fb_t * const dfb);
-
+// Wait for data to become ready when fb used as destination of writeback
+// Returns:
+//  -ve   error
+//  0     timeout
+//  1     ready
+int drmu_fb_out_fence_wait(drmu_fb_t * const fb, const int timeout_ms);
 
 // fb pool
 
@@ -337,9 +322,8 @@ int drmu_atomic_conn_broadcast_rgb_set(struct drmu_atomic_s * const da, drmu_con
 // Add crtc id
 int drmu_atomic_conn_add_crtc(struct drmu_atomic_s * const da, drmu_conn_t * const dn, drmu_crtc_t * const dc);
 
-// Add writeback fence
-int drmu_atomic_conn_add_writeback_out_fence(struct drmu_atomic_s * const da, drmu_conn_t * const dn, drmu_fence_t * const fence);
-// Add writeback fb
+// Add writeback fb & fence
+// Neither makes sense without the other so do together
 int drmu_atomic_conn_add_writeback_fb(struct drmu_atomic_s * const da, drmu_conn_t * const dn, drmu_fb_t * const dfb);
 
 

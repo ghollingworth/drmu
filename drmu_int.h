@@ -79,7 +79,9 @@ typedef struct drmu_fb_s {
     void * on_delete_v;
     drmu_fb_on_delete_fn on_delete_fn;
 
-    drmu_fence_t * fence;
+    // We pass a pointer to this to DRM which defines it as s32 so do not use
+    // int that might be s64.
+    int32_t fence_fd;
 } drmu_fb_t;
 
 typedef struct drmu_fb_list_s {

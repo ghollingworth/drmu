@@ -612,7 +612,7 @@ int main(int argc, char *argv[])
             fprintf(stderr, "Failed to commit writeback\n");
             goto fail;
         }
-        rv = drmu_fence_wait(drmu_fb_fence_get(fb_out), 1000);
+        rv = drmu_fb_out_fence_wait(fb_out, 1000);
         if (rv == 1) {
             printf("Waited OK for writeback\n");
         }
@@ -623,7 +623,6 @@ int main(int argc, char *argv[])
             fprintf(stderr, "Failed to wait for writeback: %s\n", strerror(-rv));
             goto fail;
         }
-        drmu_fb_fence_unset(fb_out);
 
         {
             FILE * f = fopen("wb.rgb", "wb");

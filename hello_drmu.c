@@ -56,6 +56,8 @@ static AVFilterContext *buffersink_ctx = NULL;
 static AVFilterContext *buffersrc_ctx = NULL;
 static AVFilterGraph *filter_graph = NULL;
 
+static AVDictionary *codec_opts = NULL;
+
 static int hw_decoder_init(AVCodecContext *ctx, const enum AVHWDeviceType type)
 {
     int err = 0;
@@ -443,6 +445,15 @@ loopy:
         }
         hw_pix_fmt = AV_PIX_FMT_DRM_PRIME;
     }
+#if 1
+    else if (decoder->id == AV_CODEC_ID_HEVC) {
+        if ((decoder = avcodec_find_decoder_by_name("hevc_v4l2m2m")) == NULL) {
+            fprintf(stderr, "Cannot find the hevc v4l2m2m decoder\n");
+            return -1;
+        }
+        hw_pix_fmt = AV_PIX_FMT_DRM_PRIME;
+    }
+#endif
     else {
         for (i = 0;; i++) {
             const AVCodecHWConfig *config = avcodec_get_hw_config(decoder, i);
@@ -474,7 +485,9 @@ loopy:
     decoder_ctx->thread_count = 3;
     decoder_ctx->flags = AV_CODEC_FLAG_LOW_DELAY;
 
-    if ((ret = avcodec_open2(decoder_ctx, decoder, NULL)) < 0) {
+    av_dict_set(&codec_opts, "meson_alloc", "1", 0);
+
+    if ((ret = avcodec_open2(decoder_ctx, decoder, &codec_opts)) < 0) {
         fprintf(stderr, "Failed to open codec for stream #%u\n", video_stream);
         return -1;
     }

@@ -607,6 +607,7 @@ int main(int argc, char *argv[])
         goto fail;
     }
 
+    drmu_atomic_plane_add_zpos(da, p1, 0);
     drmu_atomic_plane_add_fb(da, p1, fb1, drmu_rect_wh(mp.width, mp.height));
 
     static const struct hdr_output_metadata meta = {

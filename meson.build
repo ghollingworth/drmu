@@ -48,7 +48,7 @@ if get_option('valgrind')
 endif
 
 drmu_base = library('drmu_base',
-	'drmu_output.c', 'drmu.c', 'drmu_fmts.c', 'drmu_atomic.c', 'pollqueue.c', 'drmu_util.c',
+	'drmu_scan.c', 'drmu_output.c', 'drmu.c', 'drmu_fmts.c', 'drmu_atomic.c', 'pollqueue.c', 'drmu_util.c',
 	c_args : args_sorted_fmts + args_io_calloc,
 	sources : h_sorted_fmts,
 	dependencies : [

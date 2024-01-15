@@ -24,6 +24,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +35,7 @@
 #include "drmu.h"
 #include "drmu_log.h"
 #include "drmu_output.h"
+#include "drmu_scan.h"
 #include "drmu_util.h"
 #include <drm_fourcc.h>
 
@@ -284,7 +286,7 @@ drmu_log_stderr_cb(void * v, enum drmu_log_level_e level, const char * fmt, va_l
 static void
 usage()
 {
-    printf("Usage: 10bittest [-M <module>] [-P <pixfmt>] [-g|-p|-f <y>,<u>,<v>] [-y] [-8] [-c <colourspace>] [-v] [<w>x<h>][@<hz>]\n\n"
+    printf("Usage: 10bittest [-M <module>] [-o <output>] [-P <pixfmt>] [-g|-p|-f <y>,<u>,<v>] [-y] [-8] [-c <colourspace>] [-v] [<w>x<h>][@<hz>]\n\n"
            "-g  grey blocks only, otherwise colour stripes\n"
            "-p  pinstripes\n"
            "-f  solid a, b, c 10-bit values\n"
@@ -298,6 +300,7 @@ usage()
            "-c  set con colorspace to (string) <colourspace>\n"
            "-8  keep max_bpc 8\n"
            "-P  pixel format fourcc\n"
+           "-o  output name, default 1st connected found\n"
            "-M  drm module name, default: " DRM_MODULE "\n"
            "-v  verbose\n"
            "-w  write to writeback rather than screen, then writen to wb.rgb\n"
@@ -340,13 +343,14 @@ int main(int argc, char *argv[])
     bool dofrac = false;
     bool try_writeback = false;
     int verbose = 0;
+    const char * output_name = NULL;
     int c;
     uint64_t fillval = p16val(~0U, 0x8000, 0x8000, 0x8000);
     uint8_t *p16 = NULL;
     unsigned int p16_stride = 0;
     int rv;
 
-    while ((c = getopt(argc, argv, "8c:e:f:FgpM:P:r:R:svwy")) != -1) {
+    while ((c = getopt(argc, argv, "8c:e:f:FgpM:o:P:r:R:svwy")) != -1) {
         switch (c) {
             case 'c':
                 colorspace = optarg;
@@ -370,6 +374,9 @@ int main(int argc, char *argv[])
                 break;
             case 'M':
                 drm_device = optarg;
+                break;
+            case 'o':
+                output_name = optarg;
                 break;
             case 'p':
                 fill_pin = true;
@@ -455,6 +462,7 @@ int main(int argc, char *argv[])
     if (broadcast_rgb == NULL)
         broadcast_rgb = drmu_color_range_to_broadcast_rgb(range);
 
+
     {
         const drmu_log_env_t log = {
             .fn = drmu_log_stderr_cb,
@@ -462,6 +470,7 @@ int main(int argc, char *argv[])
             .max_level = verbose ? DRMU_LOG_LEVEL_ALL : DRMU_LOG_LEVEL_INFO
         };
         if (
+            drmu_scan_output(output_name, &log, &du, &dout) != 0 &&
 #if HAS_WAYLEASE
             (du = drmu_env_new_waylease(&log)) == NULL &&
 #endif
@@ -476,24 +485,26 @@ int main(int argc, char *argv[])
 
     da = drmu_atomic_new(du);
 
-    if ((dout = drmu_output_new(du)) == NULL)
-        goto fail;
-
-    drmu_output_max_bpc_allow(dout, true);
-    drmu_output_modeset_allow(dout, true);
-
-    if (try_writeback) {
-        if (drmu_output_add_writeback(dout) != 0) {
-            fprintf(stderr, "Failed to add writeback\n");
+    if (dout == NULL) {
+        if ((dout = drmu_output_new(du)) == NULL)
             goto fail;
+
+        if (try_writeback) {
+            if (drmu_output_add_writeback(dout) != 0) {
+                fprintf(stderr, "Failed to add writeback\n");
+                goto fail;
+            }
         }
-    }
-    else {
-        if (drmu_output_add_output(dout, NULL) != 0)
-            goto fail;
+        else {
+            if (drmu_output_add_output(dout, output_name) != 0)
+                goto fail;
+        }
     }
     dc = drmu_output_crtc(dout);
     dn = drmu_output_conn(dout, 0);
+
+    drmu_output_max_bpc_allow(dout, true);
+    drmu_output_modeset_allow(dout, true);
 
     drmu_output_max_bpc_allow(dout, hi_bpc);
 
@@ -596,7 +607,10 @@ int main(int argc, char *argv[])
     else if (p1fmt == DRM_FORMAT_ABGR2101010)
         plane16_to_abgr2101010(drmu_fb_data(fb1, 0), drmu_fb_pitch(fb1, 0),
                                p16, p16_stride, mp.width, mp.height);
-    else if (p1fmt == DRM_FORMAT_ABGR8888)
+    else if (p1fmt == DRM_FORMAT_ARGB8888 || p1fmt == DRM_FORMAT_XRGB8888)
+        plane16_to_argb8888(drmu_fb_data(fb1, 0), drmu_fb_pitch(fb1, 0),
+                               p16, p16_stride, mp.width, mp.height);
+    else if (p1fmt == DRM_FORMAT_ABGR8888 || p1fmt == DRM_FORMAT_XBGR8888)
         plane16_to_abgr8888(drmu_fb_data(fb1, 0), drmu_fb_pitch(fb1, 0),
                                p16, p16_stride, mp.width, mp.height);
     else if (p1fmt == DRM_FORMAT_NV12) {

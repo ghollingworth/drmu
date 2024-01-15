@@ -62,7 +62,25 @@ plane16_to_abgr8888(uint8_t * const dst_data, const unsigned int dst_stride,
         }
     }
 }
-
+// v0 -> A(8), v3 -> B(8), v2 -> G(8), v1 -> R(8)
+void
+plane16_to_argb8888(uint8_t * const dst_data, const unsigned int dst_stride,
+                    const uint8_t * const src_data, const unsigned int src_stride,
+                    const unsigned int w, const unsigned int h)
+{
+    unsigned int i, j;
+    for (i = 0; i != h; ++i) {
+        const uint64_t * s = (const uint64_t *)(src_data + i * src_stride);
+        uint32_t * d = (uint32_t *)(dst_data + i * dst_stride);
+        for (j = 0; j != w; ++j, ++d, ++s) {
+            *d =
+                (((*s >> (48 + 8)) & 0xff) << 24) |
+                (((*s >> (32 + 8)) & 0xff) << 16) |
+                (((*s >> (16 + 8)) & 0xff) <<  8) |
+                (((*s >> (0  + 8)) & 0xff) <<  0);
+        }
+    }
+}
 
 // v1 -> Y(10)
 void

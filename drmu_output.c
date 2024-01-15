@@ -331,6 +331,7 @@ retry:
     dc_t = NULL;
 
     for (i = 0; (dn_t = drmu_env_conn_find_n(du, i)) != NULL; ++i) {
+        drmu_debug(du, "try conn: %s", drmu_conn_name(dn_t));
         if (!drmu_conn_is_output(dn_t) || drmu_conn_is_claimed(dn_t))
             continue;
         if (nlen && strncmp(conn_name, drmu_conn_name(dn_t), nlen) != 0)

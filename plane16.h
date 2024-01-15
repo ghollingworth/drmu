@@ -16,6 +16,10 @@ void
 plane16_to_abgr8888(uint8_t * const dst_data, const unsigned int dst_stride,
                     const uint8_t * const src_data, const unsigned int src_stride,
                     const unsigned int w, const unsigned int h);
+void
+plane16_to_argb8888(uint8_t * const dst_data, const unsigned int dst_stride,
+                    const uint8_t * const src_data, const unsigned int src_stride,
+                    const unsigned int w, const unsigned int h);
 
 // v1 -> Y(10)
 void plane16_to_sand30_y(uint8_t * const dst_data, const unsigned int dst_stride2,

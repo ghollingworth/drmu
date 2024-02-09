@@ -324,16 +324,16 @@ int init_egl(struct egl *egl, const struct gbm *gbm, int samples)
 
 #define get_proc_client(ext, name) do { \
 		if (has_ext(egl_exts_client, #ext)) \
-			egl->name = (void *)eglGetProcAddress(#name); \
+			egl->name = (typeof(egl->name))eglGetProcAddress(#name); \
 	} while (0)
 #define get_proc_dpy(ext, name) do { \
 		if (has_ext(egl_exts_dpy, #ext)) \
-			egl->name = (void *)eglGetProcAddress(#name); \
+			egl->name = (typeof(egl->name))eglGetProcAddress(#name); \
 	} while (0)
 
 #define get_proc_gl(ext, name) do { \
 		if (has_ext(gl_exts, #ext)) \
-			egl->name = (void *)eglGetProcAddress(#name); \
+			egl->name = (typeof(egl->name))eglGetProcAddress(#name); \
 	} while (0)
 
 	egl_exts_client = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);

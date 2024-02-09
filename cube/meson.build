@@ -20,18 +20,6 @@
 #  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 #  SOFTWARE.
 #
-project(
-  'kmscube',
-  'c',
-  version : '0.0.1',
-  license : 'MIT',
-  meson_version : '>= 0.47',
-  default_options : ['c_std=gnu99', 'warning_level=2']
-)
-
-if get_option('c_std') != 'gnu99'
-  error('c_std must be gnu99')
-endif
 
 sources = files(
   'common.c',
@@ -56,12 +44,13 @@ dep_libdrm = dependency('libdrm', version : '>=2.4.71')
 dep_gbm = dependency('gbm', version : '>=13.0')
 dep_egl = dependency('egl')
 dep_gles2 = dependency('glesv2')
+cube_c_args = []
 
 with_gles3 = cc.check_header('GLES3/gl3.h', dependencies: dep_gles2)
 
 if with_gles3
   sources += files('cube-shadertoy.c')
-  add_project_arguments('-DHAVE_GLES3', language : 'c')
+  cube_c_args += ['-DHAVE_GLES3']
   message('GLES3 supported; shadertoy & texturator are included in this build')
 else
   warning('GLES3 not supported; shadertoy & texturator are NOT included in this build')
@@ -70,7 +59,7 @@ endif
 dep_libpng = dependency('libpng', required : false)
 
 if dep_libpng.found()
-  add_project_arguments('-DHAVE_LIBPNG', language : 'c')
+  cube_c_args += ['-DHAVE_LIBPNG']
 endif
 
 dep_common = [dep_m, dep_threads, dep_libdrm, dep_gbm, dep_egl, dep_gles2, dep_libpng]
@@ -83,9 +72,9 @@ foreach _dep : [
   'gstreamer-allocators-1.0',
   'gstreamer-video-1.0',
 ]
-  dep_gst += dependency(_dep, version : '>= 1.6.0', required : get_option('gstreamer'))
+  dep_gst += dependency(_dep, version : '>= 1.6.0')
 endforeach
-dep_gst += dependency('glib-2.0', required : get_option('gstreamer'))
+dep_gst += dependency('glib-2.0')
 
 # See if we found everything we needed
 with_gst = true
@@ -98,20 +87,28 @@ endforeach
 if with_gst
   dep_common += dep_gst
   sources += files('cube-video.c', 'gst-decoder.c')
-  add_project_arguments('-DHAVE_GST', language : 'c')
+  cube_c_args += ['-DHAVE_GST']
   message('Building with gstreamer support')
 else
   message('Building without gstreamer support')
 endif
 
-executable('kmscube', sources, dependencies : dep_common, install : true)
+executable('kmscube', sources,
+	dependencies : dep_common,
+	c_args : cube_c_args,
+	install : true)
 
 if with_gles3
-  executable('texturator', files(
-    'common.c',
-    'drm-legacy.c',
-    'drm-common.c',
-    'perfcntrs.c',  # not used, but required to link
-    'texturator.c',
-  ), dependencies : dep_common, install : true)
+  executable('texturator',
+	files(
+		'common.c',
+		'drm-legacy.c',
+		'drm-common.c',
+		'perfcntrs.c',  # not used, but required to link
+		'texturator.c',
+	 ),
+	 dependencies : dep_common,
+	 c_args : cube_c_args,
+	 install : true
+  )
 endif

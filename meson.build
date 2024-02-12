@@ -142,6 +142,15 @@ drmu_av = library('drmu_av',
 	],
 )
 
+drmu_gbm = library('drmu_gbm',
+	'drmu/drmu_gbm.c',
+	link_with : drmu_base,
+	dependencies : [
+		threads_dep,
+		dependency('gbm'),
+	],
+)
+
 drmu_incs = include_directories('drmu', 'pollqueue')
 
 executable(

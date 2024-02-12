@@ -28,6 +28,7 @@ sources = files(
   'cube-tex.c',
   'drm-atomic.c',
   'drm-common.c',
+  'drm-drmu.c',
   'drm-legacy.c',
   'drm-offscreen.c',
   'esTransform.c',
@@ -96,6 +97,8 @@ endif
 executable('kmscube', sources,
 	dependencies : dep_common,
 	c_args : cube_c_args,
+	include_directories : drmu_incs,
+	link_with : [ drmu_base, drmu_gbm ],
 	install : true)
 
 if with_gles3

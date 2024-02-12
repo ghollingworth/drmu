@@ -48,6 +48,10 @@ struct connector {
 	drmModePropertyRes **props_info;
 };
 
+struct drmu_env_s;
+struct drmu_output_s;
+struct drmu_plane_s;
+
 struct drm {
 	int fd;
 
@@ -66,6 +70,11 @@ struct drm {
 	/* number of frames to run for: */
 	unsigned int count;
 
+	// drmu vars
+	struct drmu_env_s * du;
+	struct drmu_output_s * dout;
+	struct drmu_plane_s * dp;
+
 	int (*run)(const struct gbm *gbm, const struct egl *egl);
 };
 
@@ -81,5 +90,6 @@ int init_drm_render(struct drm *drm, const char *device, const char *mode_str, u
 const struct drm * init_drm_legacy(const char *device, const char *mode_str, int connector_id, unsigned int vrefresh, unsigned int count);
 const struct drm * init_drm_atomic(const char *device, const char *mode_str, int connector_id, unsigned int vrefresh, unsigned int count);
 const struct drm * init_drm_offscreen(const char *device, const char *mode_str, unsigned int count);
+const struct drm * init_drmu(const char *device, const char *mode_str, unsigned int count, const uint32_t format);
 
 #endif /* _DRM_COMMON_H */

@@ -253,7 +253,7 @@ create_framebuffer(const struct egl *egl, struct gbm_bo *bo,
 
 	if (egl->modifiers_supported) {
 		const uint64_t modifier = gbm_bo_get_modifier(bo);
-		if (modifier != DRM_FORMAT_MOD_LINEAR) {
+		if (modifier != DRM_FORMAT_MOD_INVALID) {
 			size_t attrs_index = 12;
 			khr_image_attrs[attrs_index++] =
 			    EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT;
@@ -340,6 +340,11 @@ int init_egl(struct egl *egl, const struct gbm *gbm, int samples)
 	get_proc_client(EGL_EXT_platform_base, eglGetPlatformDisplayEXT);
 
 	if (egl->eglGetPlatformDisplayEXT) {
+		if (!gbm->surface) {
+			egl->display = egl->eglGetPlatformDisplayEXT(EGL_PLATFORM_SURFACELESS_MESA,
+					EGL_DEFAULT_DISPLAY, NULL);
+		}
+		else
 		egl->display = egl->eglGetPlatformDisplayEXT(EGL_PLATFORM_GBM_KHR,
 				gbm->dev, NULL);
 	} else {
@@ -379,6 +384,10 @@ int init_egl(struct egl *egl, const struct gbm *gbm, int samples)
 		return -1;
 	}
 
+	if (!gbm->surface) {
+		egl->config = EGL_NO_CONFIG_KHR;
+	}
+	else
 	if (!egl_choose_config(egl->display, config_attribs, gbm->format,
                                &egl->config)) {
 		printf("failed to choose config\n");

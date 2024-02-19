@@ -33,6 +33,7 @@
 #include <unistd.h>
 
 #include "common.h"
+#include "drmu.h"
 
 static struct gbm gbm;
 
@@ -301,6 +302,81 @@ create_framebuffer(const struct egl *egl, struct gbm_bo *bo,
 	return true;
 }
 
+static bool
+create_framebuffer_drmu(const struct egl *egl, drmu_fb_t * const dfb,
+		struct framebuffer *fb) {
+	assert(egl->eglCreateImageKHR);
+	assert(fb);
+
+	// 1. Create EGLImage.
+	int fd = drmu_bo_export_fd(drmu_fb_bo(dfb, 0), 0);
+	if (fd < 0) {
+		printf("failed to get fd for bo: %d\n", fd);
+		return false;
+	}
+
+	EGLint khr_image_attrs[17] = {
+		EGL_WIDTH, drmu_fb_width(dfb),
+		EGL_HEIGHT, drmu_fb_height(dfb),
+		EGL_LINUX_DRM_FOURCC_EXT, (int)drmu_fb_pixel_format(dfb),
+		EGL_DMA_BUF_PLANE0_FD_EXT, fd,
+		EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
+		EGL_DMA_BUF_PLANE0_PITCH_EXT, drmu_fb_pitch(dfb, 0),
+		EGL_NONE, EGL_NONE,	/* modifier lo */
+		EGL_NONE, EGL_NONE,	/* modifier hi */
+		EGL_NONE,
+	};
+
+	if (egl->modifiers_supported) {
+		const uint64_t modifier = drmu_fb_modifier(dfb, 0);
+		if (modifier != DRM_FORMAT_MOD_INVALID) {
+			size_t attrs_index = 12;
+			khr_image_attrs[attrs_index++] =
+			    EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT;
+			khr_image_attrs[attrs_index++] = modifier & 0xfffffffful;
+			khr_image_attrs[attrs_index++] =
+			    EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT;
+			khr_image_attrs[attrs_index++] = modifier >> 32;
+		}
+	}
+
+	fb->image = egl->eglCreateImageKHR(egl->display, EGL_NO_CONTEXT,
+			EGL_LINUX_DMA_BUF_EXT, NULL /* no client buffer */,
+			khr_image_attrs);
+
+	if (fb->image == EGL_NO_IMAGE_KHR) {
+		printf("failed to make image from buffer object\n");
+		return false;
+	}
+
+	// EGLImage takes the fd ownership.
+	close(fd);
+
+	// 2. Create GL texture and framebuffer.
+	glGenTextures(1, &fb->tex);
+	glBindTexture(GL_TEXTURE_2D, fb->tex);
+	egl->glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, fb->image);
+	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glBindTexture(GL_TEXTURE_2D, 0);
+
+	glGenFramebuffers(1, &fb->fb);
+	glBindFramebuffer(GL_FRAMEBUFFER, fb->fb);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+			fb->tex, 0);
+
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+		printf("failed framebuffer check for created target buffer\n");
+		glDeleteFramebuffers(1, &fb->fb);
+		glDeleteTextures(1, &fb->tex);
+		return false;
+	}
+
+	return true;
+}
+
 int init_egl(struct egl *egl, const struct gbm *gbm, int samples)
 {
 	EGLint major, minor;
@@ -438,7 +514,15 @@ int init_egl(struct egl *egl, const struct gbm *gbm, int samples)
 	get_proc_gl(GL_AMD_performance_monitor, glEndPerfMonitorAMD);
 	get_proc_gl(GL_AMD_performance_monitor, glGetPerfMonitorCounterDataAMD);
 
-	if (!gbm->surface) {
+	if (gbm->dfbs[0]) {
+		for (unsigned i = 0; i < ARRAY_SIZE(gbm->dfbs); i++) {
+			if (!create_framebuffer_drmu(egl, gbm->dfbs[i], &egl->fbs[i])) {
+				printf("failed to create drmu framebuffer\n");
+				return -1;
+			}
+		}
+	}
+	else if (!gbm->surface) {
 		for (unsigned i = 0; i < ARRAY_SIZE(gbm->bos); i++) {
 			if (!create_framebuffer(egl, gbm->bos[i], &egl->fbs[i])) {
 				printf("failed to create framebuffer\n");

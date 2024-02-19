@@ -112,6 +112,26 @@ if with_gles3
 	 ),
 	 dependencies : dep_common,
 	 c_args : cube_c_args,
+	 include_directories : drmu_incs,
+	 link_with : [ drmu_base, drmu_gbm ],
 	 install : true
   )
 endif
+
+runcube_drmu = library('runcube_drmu',
+	'runcube.c',
+    'common.c',
+    'cube-smooth.c',
+    'drm-common.c',
+    'drm-drmu.c',
+    'esTransform.c',
+    'perfcntrs.c',
+	 c_args : cube_c_args,
+	 include_directories : drmu_incs,
+	 link_with : [ drmu_base ],
+	dependencies : [
+		threads_dep,
+		dep_common
+	],
+)
+

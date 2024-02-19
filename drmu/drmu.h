@@ -225,6 +225,11 @@ int drmu_atomic_add_prop_range(struct drmu_atomic_s * const da, const uint32_t o
 
 struct drm_mode_create_dumb;
 
+// Create an fd from a bo
+// fd not tracked by the bo so it is the callers reponsibility to free it
+// if flags are 0 then RDWR | CLOEXEC will be used
+int drmu_bo_export_fd(drmu_bo_t * bo, uint32_t flags);
+
 void drmu_bo_unref(drmu_bo_t ** const ppbo);
 drmu_bo_t * drmu_bo_ref(drmu_bo_t * const bo);
 drmu_bo_t * drmu_bo_new_fd(drmu_env_t *const du, const int fd);
@@ -268,6 +273,7 @@ uint32_t drmu_fb_pitch(const drmu_fb_t *const dfb, const unsigned int layer);
 // Pitch2 is only a sand thing
 uint32_t drmu_fb_pitch2(const drmu_fb_t *const dfb, const unsigned int layer);
 void * drmu_fb_data(const drmu_fb_t *const dfb, const unsigned int layer);
+drmu_bo_t * drmu_fb_bo(const drmu_fb_t * const dfb, const unsigned int layer);
 uint32_t drmu_fb_width(const drmu_fb_t *const dfb);
 uint32_t drmu_fb_height(const drmu_fb_t *const dfb);
 // Set cropping (fractional) - x, y, relative to active x, y (and must be +ve)
@@ -575,6 +581,9 @@ int drmu_atomic_commit(const drmu_atomic_t * const da, uint32_t flags);
 // Attempt commit - if it fails add failing members to da_fail
 // This does NOT remove failing props from da.  If da_fail == NULL then same as _commit
 int drmu_atomic_commit_test(const drmu_atomic_t * const da, uint32_t flags, drmu_atomic_t * const da_fail);
+
+int drmu_atomic_add_commit_callback(drmu_atomic_t * const da, void (* cb)(void * v), void * v);
+void drmu_atomic_clear_commit_callbacks(drmu_atomic_t * const da);
 
 typedef void drmu_prop_unref_fn(void * v);
 typedef void drmu_prop_ref_fn(void * v);

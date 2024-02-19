@@ -6,6 +6,7 @@
 #include <string.h>
 #include <unistd.h>
 
+
 #include "common.h"
 #include "drm-common.h"
 
@@ -32,20 +33,19 @@ drmu_log_stderr_cb(void * v, enum drmu_log_level_e level, const char * fmt, va_l
     fwrite(buf, n + 1, 1, stderr);
 }
 
+static void
+commit_cb(void * v)
+{
+    struct drm * drm = v;
+    sem_post(&drm->commit_sem);
+}
+
 static int run_drmu(const struct gbm *gbm, const struct egl *egl)
 {
     struct drm * const drm = &drm_static;
-    drmu_fb_t * fbs[NUM_BUFFERS];
     unsigned int i;
     unsigned int n;
 	int64_t start_time, report_time, cur_time;
-
-    for (i = 0; i != NUM_BUFFERS; ++i) {
-        if ((fbs[i] = drmu_fb_gbm_attach(drm->du, gbm->bos[i])) == NULL) {
-            fprintf(stderr, "Failed to attach gbm to drmu\n");
-            return -1;
-        }
-    }
 
 	start_time = report_time = get_time_ns();
 
@@ -71,10 +71,11 @@ static int run_drmu(const struct gbm *gbm, const struct egl *egl)
 
         {
             drmu_atomic_t * da = drmu_atomic_new(drm->du);
-            drmu_atomic_plane_add_fb(da, drm->dp, fbs[n], drmu_rect_wh(drm->mode->hdisplay, drm->mode->vdisplay));
+            drmu_atomic_plane_add_fb(da, drm->dp, gbm->dfbs[n], drmu_rect_wh(drm->mode->hdisplay / 2, drm->mode->vdisplay / 2));
+            drmu_atomic_add_commit_callback(da, commit_cb, drm);
             drmu_atomic_queue(&da);
         }
-		drmu_env_queue_wait(drm->du);
+        sem_wait(&drm->commit_sem);
 
 		cur_time = get_time_ns();
 		if (cur_time > (report_time + 2 * NSEC_PER_SEC)) {
@@ -102,11 +103,55 @@ static int run_drmu(const struct gbm *gbm, const struct egl *egl)
 	return 0;
 }
 
+
 const struct drm *
-init_drmu(const char *device, const char *mode_str, unsigned int count, const uint32_t format)
+init_drmu_dout(drmu_output_t * const dout, unsigned int count, const uint32_t format)
 {
     struct drm * drm = &drm_static;
     const drmu_mode_simple_params_t * sparam;
+
+    drm->fd = -1;
+    drm->count = count;
+    drm->run = run_drmu;
+    drm->du = drmu_output_env(dout);
+    drm->dout = dout;
+    if ((drm->mode = calloc(1, sizeof(drm->mode))) == NULL) {
+        fprintf(stderr, "Failed drm mode alloc\n");
+        goto fail;
+    }
+
+    sparam = drmu_output_mode_simple_params(drm->dout);
+    drm->mode->hdisplay = sparam->width;
+    drm->mode->vdisplay = sparam->height;
+
+    // This doesn't really want to be the primary
+    if ((drm->dp = drmu_output_plane_ref_format(drm->dout, DRMU_PLANE_TYPE_OVERLAY, format, 0)) == NULL)
+        goto fail;
+
+#if 0
+    {
+        drmu_atomic_t * da = drmu_atomic_new(drm->du);
+        drmu_atomic_plane_add_zpos(da, drm->dp, 100);
+        drmu_atomic_commit(da);
+        drmu_atomic_unref(&da);
+    }
+#endif
+
+    sem_init(&drm->commit_sem, 0, 0);
+
+    return drm;
+
+fail:
+    free(drm->mode);
+    return NULL;
+}
+
+
+const struct drm *
+init_drmu(const char *device, const char *mode_str, unsigned int count, const uint32_t format)
+{
+    drmu_env_t * du = NULL;
+    drmu_output_t * dout = NULL;
 
     const drmu_log_env_t log = {
         .fn = drmu_log_stderr_cb,
@@ -116,34 +161,31 @@ init_drmu(const char *device, const char *mode_str, unsigned int count, const ui
 
     (void)mode_str;
 
-    drm->fd = -1;
-    drm->count = count;
-    drm->run = run_drmu;
-    if ((drm->mode = calloc(1, sizeof(drm->mode))) == NULL) {
-        fprintf(stderr, "Failed drm mode alloc\n");
-        goto fail;
-    }
-
-    if (drmu_scan_output(device, &log, &drm->du, &drm->dout) != 0) {
+    if (drmu_scan_output(device, &log, &du, &dout) != 0) {
         fprintf(stderr, "Failed drmu scan for device %s\n", device);
-        goto fail;
+        return NULL;
     }
-    drmu_env_restore_enable(drm->du);
+    drmu_env_restore_enable(du);
 
-    sparam = drmu_output_mode_simple_params(drm->dout);
-    drm->mode->hdisplay = sparam->width;
-    drm->mode->vdisplay = sparam->height;
+    return init_drmu_dout(dout, count, format);
+}
 
-    // This wants to be the primary
-    if ((drm->dp = drmu_output_plane_ref_format(drm->dout, 0, drmu_gbm_fmt_to_drm(format), 0)) == NULL)
-        goto fail;
+const struct gbm * init_gbm_drmu(drmu_env_t * du, int w, int h, uint32_t format, uint64_t modifier)
+{
+    struct gbm * gbm = calloc(1, sizeof(*gbm));
+    unsigned int i;
 
-    drm->fd = drmu_fd(drm->du);
+    if (!gbm)
+        return NULL;
 
-    return drm;
+    gbm->format = format;
+    gbm->width = w;
+    gbm->height = h;
 
-fail:
-    free(drm->mode);
-    return NULL;
+    for (i = 0; i != NUM_BUFFERS; ++i) {
+        gbm->dfbs[i] = drmu_fb_new_dumb_mod(du, w, h, format, modifier);
+    }
+
+    return gbm;
 }
 

@@ -40,6 +40,8 @@
 #include "drmu_output.h"
 #include <drm_fourcc.h>
 
+#include "cube/runcube.h"
+
 #define TRACE_ALL 0
 
 #define DRM_MODULE "vc4"
@@ -223,6 +225,8 @@ drmprime_out_env_t* drmprime_out_new()
         goto fail;
 
     // Plane allocation delayed till we have a format - not all planes are idempotent
+
+    runcube_drmu(de->dout);
 
     return de;
 

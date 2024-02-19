@@ -577,6 +577,12 @@ drmu_output_conn(const drmu_output_t * const dout, const unsigned int n)
     return !dout || n >= dout->conn_n ? NULL : dout->dns[n];
 }
 
+drmu_env_t *
+drmu_output_env(const drmu_output_t * const dout)
+{
+    return dout->du;
+}
+
 static void
 output_free(drmu_output_t * const dout)
 {
@@ -585,6 +591,7 @@ output_free(drmu_output_t * const dout)
         drmu_conn_unref(dout->dns + i);
     free(dout->dns);
     drmu_crtc_unref(&dout->dc);
+    drmu_env_unref(&dout->du);
     free(dout);
 }
 
@@ -609,7 +616,7 @@ drmu_output_new(drmu_env_t * const du)
         return NULL;
     }
 
-    dout->du = du;
+    dout->du = drmu_env_ref(du);
     dout->mode_id = -1;
     return dout;
 }

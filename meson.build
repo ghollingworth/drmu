@@ -48,7 +48,7 @@ if get_option('valgrind')
 endif
 
 drmu_base = library('drmu_base',
-	'drmu/drmu_scan.c', 'drmu/drmu_output.c', 'drmu/drmu.c', 'drmu/drmu_fmts.c', 'drmu/drmu_atomic.c', 'drmu/drmu_util.c', 'pollqueue/pollqueue.c',
+	'drmu/drmu_scan.c', 'drmu/drmu_output.c', 'drmu/drmu_dmabuf.c', 'drmu/drmu.c', 'drmu/drmu_fmts.c', 'drmu/drmu_atomic.c', 'drmu/drmu_util.c', 'pollqueue/pollqueue.c',
 	c_args : args_sorted_fmts + args_io_calloc,
 	sources : h_sorted_fmts,
 	include_directories : ['pollqueue'],
@@ -121,7 +121,7 @@ if wl_client_dep.found()
 	endforeach
 
 	drmu_waylease = library('drmu_waylease',
-		'drmu_waylease.c',
+		'drmu/drmu_waylease.c',
 		sources : protocols_files,
 		link_with : drmu_base,
 		dependencies : [

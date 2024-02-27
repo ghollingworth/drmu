@@ -1031,6 +1031,8 @@ typedef struct drmu_fb_s {
     drmu_rect_t active;     // Area that was asked for inside the buffer; pixels
     drmu_rect_t crop;       // Cropping inside that; fractional pels (16.16, 16.16)
 
+    int buf_fd;
+
     void * map_ptr;
     size_t map_size;
     size_t map_pitch;
@@ -1112,6 +1114,9 @@ drmu_fb_int_free(drmu_fb_t * const dfb)
 
     for (i = 0; i != 4; ++i)
         drmu_bo_unref(dfb->bo_list + i);
+
+    if (dfb->buf_fd != -1)
+        close(dfb->buf_fd);
 
     // Call on_delete last so we have stopped using anything that might be
     // freed by it
@@ -1301,6 +1306,20 @@ drmu_fb_int_bo_set(drmu_fb_t *const dfb, unsigned int i, drmu_bo_t * const bo)
 }
 
 void
+drmu_fb_int_fd_set(drmu_fb_t *const dfb, const int fd)
+{
+    dfb->buf_fd = fd;
+}
+
+void
+drmu_fb_int_mmap_set(drmu_fb_t *const dfb, void * const buf, const size_t size, const size_t pitch)
+{
+    dfb->map_ptr = buf;
+    dfb->map_size = size;
+    dfb->map_pitch = pitch;
+}
+
+void
 drmu_fb_int_layer_mod_set(drmu_fb_t *const dfb, unsigned int i, unsigned int obj_idx, uint32_t pitch, uint32_t offset, uint64_t modifier)
 {
     dfb->fb.handles[i] = dfb->bo_list[obj_idx]->handle;
@@ -1394,6 +1413,7 @@ drmu_fb_int_alloc(drmu_env_t * const du)
 
     dfb->du = du;
     dfb->chroma_siting = DRMU_CHROMA_SITING_UNSPECIFIED;
+    dfb->buf_fd = -1;
     dfb->fence_fd = -1;
     return dfb;
 }

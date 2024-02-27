@@ -30,8 +30,11 @@
 #include <unistd.h>
 #include <memory.h>
 
+#include <fcntl.h>
+
 #include "config.h"
 #include "drmu.h"
+#include "drmu_dmabuf.h"
 #include "drmu_log.h"
 #include "drmu_output.h"
 #include "drmu_util.h"
@@ -565,10 +568,18 @@ int main(int argc, char *argv[])
         goto fail;
     }
 
+#if 1
+    drmu_dmabuf_env_t * dde = drmu_dmabuf_env_new_fd(du, open("/dev/dma_heap/vidbuf_cached", O_RDWR | O_CLOEXEC));
+    if ((fb1 = drmu_dmabuf_fb_new_mod(dde, mp.width, mp.height, p1fmt, p1mod)) == NULL) {
+        fprintf(stderr, "Cannot make dmabuf for %s\n", drmu_log_fourcc(p1fmt));
+        goto fail;
+    }
+#else
     if ((fb1 = drmu_fb_new_dumb_mod(du, mp.width, mp.height, p1fmt, p1mod)) == NULL) {
         fprintf(stderr, "Cannot make dumb for %s\n", drmu_log_fourcc(p1fmt));
         goto fail;
     }
+#endif
 
     drmu_fb_int_color_set(fb1, encoding, range, colorspace);
     printf("%s encoding: %s, range %s\n", is_yuv ? "YUV" : "RGB", encoding, range);

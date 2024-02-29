@@ -56,7 +56,6 @@ typedef struct drmprime_out_env_s
     drmu_env_t * du;
     drmu_output_t * dout;
     drmu_plane_t * dp;
-    drmu_dmabuf_env_t * dde;
     drmu_pool_t * pic_pool;
     drmu_atomic_t * display_set;
 
@@ -121,8 +120,7 @@ int drmprime_out_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags
 
 int drmprime_out_display(drmprime_out_env_t *de, struct AVFrame *src_frame)
 {
-    AVFrame *frame;
-    bool is_prime = true;
+    bool is_prime;
 
     if ((src_frame->flags & AV_FRAME_FLAG_CORRUPT) != 0) {
         fprintf(stderr, "Discard corrupt frame: fmt=%d, ts=%" PRId64 "\n", src_frame->format, src_frame->pts);
@@ -130,16 +128,7 @@ int drmprime_out_display(drmprime_out_env_t *de, struct AVFrame *src_frame)
     }
 
     if (src_frame->format == AV_PIX_FMT_DRM_PRIME) {
-        frame = av_frame_alloc();
-        av_frame_ref(frame, src_frame);
-    } else if (src_frame->format == AV_PIX_FMT_VAAPI) {
-        frame = av_frame_alloc();
-        frame->format = AV_PIX_FMT_DRM_PRIME;
-        if (av_hwframe_map(frame, src_frame, 0) != 0) {
-            fprintf(stderr, "Failed to map frame (format=%d) to DRM_PRiME\n", src_frame->format);
-            av_frame_free(&frame);
-            return AVERROR(EINVAL);
-        }
+        is_prime = true;
     } else if (src_frame->opaque == de) {
         is_prime = false;
     }
@@ -164,7 +153,6 @@ int drmprime_out_display(drmprime_out_env_t *de, struct AVFrame *src_frame)
             if (!de->dp) {
                 fprintf(stderr, "Failed to find plane for pixel format %s mod %#" PRIx64 "\n", drmu_log_fourcc(drmu_fb_pixel_format(dfb)), drmu_fb_modifier(dfb, 0));
                 drmu_atomic_unref(&da);
-                av_frame_free(&frame);
                 return AVERROR(EINVAL);
             }
         }
@@ -194,8 +182,6 @@ int drmprime_out_display(drmprime_out_env_t *de, struct AVFrame *src_frame)
         drmu_fb_unref(&dfb);
         drmu_atomic_queue(&da);
     }
-
-    av_frame_free(&frame);
 
     return 0;
 }
@@ -238,7 +224,6 @@ int drmprime_out_modeset(drmprime_out_env_t * de, int w, int h, const AVRational
 
 void drmprime_out_delete(drmprime_out_env_t *de)
 {
-    drmu_dmabuf_unref(&de->dde);
     drmu_pool_unref(&de->pic_pool);
     drmu_plane_unref(&de->dp);
     drmu_output_unref(&de->dout);
@@ -291,10 +276,19 @@ drmprime_out_env_t* drmprime_out_new()
 
     drmu_output_max_bpc_allow(de->dout, true);
 
-    if ((de->dde = drmu_dmabuf_env_new_video(de->du)) == NULL)
-        goto fail;
-    if ((de->pic_pool = drmu_pool_new_dmabuf(de->dde, 32)) == NULL)
-        goto fail;
+    {
+        drmu_dmabuf_env_t * dde;
+        if ((dde = drmu_dmabuf_env_new_video(de->du)) == NULL)
+            goto fail;
+
+        de->pic_pool = drmu_pool_new_dmabuf(dde, 32);
+
+        // The pool holds a ref - we don't need to hold one ourselves too
+        drmu_dmabuf_env_unref(&dde);
+
+        if (de->pic_pool == NULL)
+            goto fail;
+    }
 
     // Plane allocation delayed till we have a format - not all planes are idempotent
 

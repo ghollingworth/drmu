@@ -358,14 +358,22 @@ int drmu_fb_out_fence_wait(drmu_fb_t * const fb, const int timeout_ms);
 
 // fb pool
 
+// cb to allocate a new pool fb
 typedef drmu_fb_t * (* drmu_pool_alloc_fn)(void * const v, const uint32_t w, const uint32_t h, const uint32_t format, const uint64_t mod);
+// cb called when pool deleted or on new_pool failure - takes the same v as alloc
+typedef void (* drmu_pool_on_delete_fn)(void * const v);
 
 void drmu_pool_unref(drmu_pool_t ** const pppool);
 drmu_pool_t * drmu_pool_ref(drmu_pool_t * const pool);
-drmu_pool_t * drmu_pool_new_alloc(drmu_env_t * const du, unsigned int total_fbs_max, drmu_pool_alloc_fn alloc_fn, void * alloc_v);
+drmu_pool_t * drmu_pool_new_alloc(drmu_env_t * const du, const unsigned int total_fbs_max,
+                                  const drmu_pool_alloc_fn alloc_fn, const drmu_pool_on_delete_fn on_delete_fn,
+                                  void * const v);
 drmu_pool_t * drmu_pool_new_dumb(drmu_env_t * const du, unsigned int total_fbs_max);
 drmu_fb_t * drmu_pool_fb_new(drmu_pool_t * const pool, uint32_t w, uint32_t h, const uint32_t format, const uint64_t mod);
-void drmu_pool_delete(drmu_pool_t ** const pppool);
+// Marks the pool as dead & unrefs this reference
+//   No allocs will succeed after this
+//   All free fbs are unrefed
+void drmu_pool_kill(drmu_pool_t ** const pppool);
 
 // Object Id
 

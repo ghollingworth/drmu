@@ -115,13 +115,13 @@ fail:
 }
 
 drmu_dmabuf_env_t *
-drmu_dmabuf_ref(drmu_dmabuf_env_t * const dde)
+drmu_dmabuf_env_ref(drmu_dmabuf_env_t * const dde)
 {
     atomic_fetch_add(&dde->ref_count, 1);
     return dde;
 }
 
-void drmu_dmabuf_unref(drmu_dmabuf_env_t ** const ppdde)
+void drmu_dmabuf_env_unref(drmu_dmabuf_env_t ** const ppdde)
 {
     drmu_dmabuf_env_t * const dde = *ppdde;
     if (dde == NULL)
@@ -177,9 +177,17 @@ pool_dmabuf_alloc_cb(void * const v, const uint32_t w, const uint32_t h, const u
     return drmu_fb_new_dmabuf_mod(v, w, h, format, mod);
 }
 
+static void
+pool_dmabuf_on_delete_cb(void * const v)
+{
+    drmu_dmabuf_env_t * dde = v;
+    drmu_dmabuf_env_unref(&dde);
+}
+
 drmu_pool_t *
 drmu_pool_new_dmabuf(drmu_dmabuf_env_t * dde, unsigned int total_fbs_max)
 {
-    return drmu_pool_new_alloc(dde->du, total_fbs_max, pool_dmabuf_alloc_cb, dde);
+    return drmu_pool_new_alloc(dde->du, total_fbs_max,
+                               pool_dmabuf_alloc_cb, pool_dmabuf_on_delete_cb, drmu_dmabuf_env_ref(dde));
 }
 

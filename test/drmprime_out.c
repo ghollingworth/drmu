@@ -57,6 +57,7 @@ typedef struct drmprime_out_env_s
     drmu_output_t * dout;
     drmu_plane_t * dp;
     drmu_dmabuf_env_t * dde;
+    drmu_pool_t * pic_pool;
     drmu_atomic_t * display_set;
 
     int mode_id;
@@ -99,7 +100,7 @@ int drmprime_out_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags
     avcodec_align_dimensions2(s, &w, &h, align);
 
     gb2 = calloc(1, sizeof(*gb2));
-    if ((gb2->fb = drmu_dmabuf_fb_new_mod(dpo->dde, w, h, fmt, mod)) == NULL)
+    if ((gb2->fb = drmu_pool_fb_new(dpo->pic_pool, w, h, fmt, mod)) == NULL)
         return AVERROR(ENOMEM);
 
     frame->buf[0] = av_buffer_create((uint8_t*)gb2, sizeof(*gb2), gb2_free, gb2, 0);
@@ -238,6 +239,7 @@ int drmprime_out_modeset(drmprime_out_env_t * de, int w, int h, const AVRational
 void drmprime_out_delete(drmprime_out_env_t *de)
 {
     drmu_dmabuf_unref(&de->dde);
+    drmu_pool_unref(&de->pic_pool);
     drmu_plane_unref(&de->dp);
     drmu_output_unref(&de->dout);
     drmu_env_unref(&de->du);
@@ -290,6 +292,8 @@ drmprime_out_env_t* drmprime_out_new()
     drmu_output_max_bpc_allow(de->dout, true);
 
     if ((de->dde = drmu_dmabuf_env_new_video(de->du)) == NULL)
+        goto fail;
+    if ((de->pic_pool = drmu_pool_new_dmabuf(de->dde, 32)) == NULL)
         goto fail;
 
     // Plane allocation delayed till we have a format - not all planes are idempotent

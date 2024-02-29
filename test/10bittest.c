@@ -570,7 +570,7 @@ int main(int argc, char *argv[])
 
 #if 1
     drmu_dmabuf_env_t * dde = drmu_dmabuf_env_new_fd(du, open("/dev/dma_heap/vidbuf_cached", O_RDWR | O_CLOEXEC));
-    if ((fb1 = drmu_dmabuf_fb_new_mod(dde, mp.width, mp.height, p1fmt, p1mod)) == NULL) {
+    if ((fb1 = drmu_fb_new_dmabuf_mod(dde, mp.width, mp.height, p1fmt, p1mod)) == NULL) {
         fprintf(stderr, "Cannot make dmabuf for %s\n", drmu_log_fourcc(p1fmt));
         goto fail;
     }

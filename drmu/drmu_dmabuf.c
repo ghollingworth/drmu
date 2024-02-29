@@ -26,7 +26,7 @@ struct drmu_dmabuf_env_s {
 };
 
 drmu_fb_t *
-drmu_dmabuf_fb_new_mod(drmu_dmabuf_env_t * const dde, const uint32_t w, const uint32_t h, const uint32_t format, const uint64_t mod)
+drmu_fb_new_dmabuf_mod(drmu_dmabuf_env_t * const dde, const uint32_t w, const uint32_t h, const uint32_t format, const uint64_t mod)
 {
     const drmu_fmt_info_t * const fmti = drmu_fmt_info_find_fmt(format);
     drmu_env_t * const du = dde->du;
@@ -169,5 +169,17 @@ drmu_dmabuf_env_new_video(struct drmu_env_s * const du)
             return dde;
     }
     return NULL;
+}
+
+static drmu_fb_t *
+pool_dmabuf_alloc_cb(void * const v, const uint32_t w, const uint32_t h, const uint32_t format, const uint64_t mod)
+{
+    return drmu_fb_new_dmabuf_mod(v, w, h, format, mod);
+}
+
+drmu_pool_t *
+drmu_pool_new_dmabuf(drmu_dmabuf_env_t * dde, unsigned int total_fbs_max)
+{
+    return drmu_pool_new_alloc(dde->du, total_fbs_max, pool_dmabuf_alloc_cb, dde);
 }
 

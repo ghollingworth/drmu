@@ -21,6 +21,8 @@ void drmu_dmabuf_unref(drmu_dmabuf_env_t ** const ppdde);
 // or on creation error
 drmu_dmabuf_env_t * drmu_dmabuf_env_new_fd(struct drmu_env_s * const du, int fd);
 
+drmu_dmabuf_env_t * drmu_dmabuf_env_new_video(struct drmu_env_s * const du);
+
 #ifdef __cplusplus
 }
 #endif

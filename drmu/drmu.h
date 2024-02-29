@@ -343,6 +343,12 @@ const struct drmu_fmt_info_s * drmu_fb_format_info_get(const drmu_fb_t * const d
 void drmu_fb_hdr_metadata_set(drmu_fb_t *const dfb, const struct hdr_output_metadata * meta);
 int drmu_fb_int_make(drmu_fb_t *const dfb);
 
+// Cached fb sync ops
+int drmu_fb_write_start(drmu_fb_t * const dfb);
+int drmu_fb_write_end(drmu_fb_t * const dfb);
+int drmu_fb_read_start(drmu_fb_t * const dfb);
+int drmu_fb_read_end(drmu_fb_t * const dfb);
+
 // Wait for data to become ready when fb used as destination of writeback
 // Returns:
 //  -ve   error

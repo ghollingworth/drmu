@@ -329,6 +329,7 @@ int main(int argc, char *argv[])
     const char * out_name = NULL;
     bool wants_deinterlace = false;
     long pace_input_hz = 0;
+    bool try_hw = true;
 
     {
         char * const * a = argv + 1;
@@ -432,6 +433,7 @@ loopy:
         return -1;
     }
 
+retry_hw:
     /* find the video stream information */
     ret = av_find_best_stream(input_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, &decoder, 0);
     if (ret < 0) {
@@ -440,7 +442,10 @@ loopy:
     }
     video_stream = ret;
 
-    if (decoder->id == AV_CODEC_ID_H264) {
+    if (!try_hw) {
+        hw_pix_fmt = AV_PIX_FMT_NONE;
+    }
+    else if (decoder->id == AV_CODEC_ID_H264) {
         if ((decoder = avcodec_find_decoder_by_name("h264_v4l2m2m")) == NULL) {
             fprintf(stderr, "Cannot find the h264 v4l2m2m decoder\n");
             return -1;
@@ -470,17 +475,37 @@ loopy:
     if (avcodec_parameters_to_context(decoder_ctx, video->codecpar) < 0)
         return -1;
 
-    decoder_ctx->get_format  = get_hw_format;
+    if (try_hw) {
+        decoder_ctx->get_format  = get_hw_format;
 
-    if (hw_decoder_init(decoder_ctx, type) < 0)
-        return -1;
+        if (hw_decoder_init(decoder_ctx, type) < 0)
+            return -1;
 
-    decoder_ctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
-    decoder_ctx->sw_pix_fmt = AV_PIX_FMT_NONE;
-    decoder_ctx->thread_count = 3;
-    decoder_ctx->flags = AV_CODEC_FLAG_LOW_DELAY;
+        decoder_ctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
+        decoder_ctx->sw_pix_fmt = AV_PIX_FMT_NONE;
+        decoder_ctx->thread_count = 3;
+        decoder_ctx->flags = AV_CODEC_FLAG_LOW_DELAY;
+    }
+    else {
+        decoder_ctx->get_buffer2 = drmprime_out_get_buffer2;
+        decoder_ctx->opaque = dpo;
+    }
+
+#if LIBAVCODEC_VERSION_MAJOR < 60
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    decoder_ctx->thread_safe_callbacks = 1;
+#pragma GCC diagnostic pop
+#endif
 
     if ((ret = avcodec_open2(decoder_ctx, decoder, NULL)) < 0) {
+        if (try_hw) {
+            try_hw = false;
+            avcodec_free_context(&decoder_ctx);
+
+            printf("H/w init failed - trying s/w\n");
+            goto retry_hw;
+        }
         fprintf(stderr, "Failed to open codec for stream #%u\n", video_stream);
         return -1;
     }

@@ -10,7 +10,6 @@
 #include <unistd.h>
 
 #include <linux/mman.h>
-#include <linux/dma-buf.h>
 #include <linux/dma-heap.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -150,5 +149,25 @@ drmu_dmabuf_env_new_fd(struct drmu_env_s * const du, const int fd)
     dde->page_size = (size_t)sysconf(_SC_PAGE_SIZE);
 
     return dde;
+}
+
+drmu_dmabuf_env_t *
+drmu_dmabuf_env_new_video(struct drmu_env_s * const du)
+{
+    static const char * const names[] = {
+        "/dev/dma_heap/vidbuf_cached",
+        "/dev/dma_heap/linux,cma",
+        "/dev/dma_heap/reserved",
+        NULL
+    };
+    const char * const * pfname;
+
+    for (pfname = names; pfname != NULL; ++pfname) {
+        int fd = open(*pfname, O_RDWR | O_CLOEXEC);
+        drmu_dmabuf_env_t * dde;
+        if (fd != -1 && (dde = drmu_dmabuf_env_new_fd(du, fd)) != NULL)
+            return dde;
+    }
+    return NULL;
 }
 

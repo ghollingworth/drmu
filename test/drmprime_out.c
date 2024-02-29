@@ -22,6 +22,9 @@
 // *** This module is a work in progress and its utility is strictly
 //     limited to testing.
 
+#include "drmprime_out.h"
+
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -36,6 +39,8 @@
 #include "config.h"
 #include "drmu.h"
 #include "drmu_av.h"
+#include "drmu_dmabuf.h"
+#include "drmu_fmts.h"
 #include "drmu_log.h"
 #include "drmu_output.h"
 #include <drm_fourcc.h>
@@ -51,16 +56,72 @@ typedef struct drmprime_out_env_s
     drmu_env_t * du;
     drmu_output_t * dout;
     drmu_plane_t * dp;
-    drmu_pool_t * pic_pool;
+    drmu_dmabuf_env_t * dde;
     drmu_atomic_t * display_set;
 
     int mode_id;
     drmu_mode_simple_params_t picked;
 } drmprime_out_env_t;
 
+typedef struct gb2_dmabuf_s
+{
+    drmu_fb_t * fb;
+} gb2_dmabuf_t;
+
+static void gb2_free(void * v, uint8_t * data)
+{
+    gb2_dmabuf_t * const gb2 = v;
+    (void)data;
+
+    drmu_fb_unref(&gb2->fb);
+    free(gb2);
+}
+
+// Assumes drmprime_out_env in s->opaque
+int drmprime_out_get_buffer2(struct AVCodecContext *s, AVFrame *frame, int flags)
+{
+    drmprime_out_env_t * const dpo = s->opaque;
+    int align[AV_NUM_DATA_POINTERS];
+    int w = frame->width;
+    int h = frame->height;
+    uint64_t mod;
+    const uint32_t fmt = drmu_av_fmt_to_drm(frame->format, &mod);
+    unsigned int i;
+    unsigned int layers;
+    const drmu_fmt_info_t * fmti;
+    gb2_dmabuf_t * gb2;
+    (void)flags;
+
+    assert((s->codec->capabilities & AV_CODEC_CAP_DR1) != 0);
+    assert(fmt != 0);
+
+    // Alignment logic taken directly from avcodec_default_get_buffer2
+    avcodec_align_dimensions2(s, &w, &h, align);
+
+    gb2 = calloc(1, sizeof(*gb2));
+    if ((gb2->fb = drmu_dmabuf_fb_new_mod(dpo->dde, w, h, fmt, mod)) == NULL)
+        return AVERROR(ENOMEM);
+
+    frame->buf[0] = av_buffer_create((uint8_t*)gb2, sizeof(*gb2), gb2_free, gb2, 0);
+
+    fmti = drmu_fb_format_info_get(gb2->fb);
+    layers = drmu_fmt_info_plane_count(fmti);
+
+    for (i = 0; i != layers; ++i) {
+        frame->data[i] = drmu_fb_data(gb2->fb, i);
+        frame->linesize[i] = drmu_fb_pitch(gb2->fb, i);
+    }
+
+    drmu_fb_write_start(gb2->fb);
+
+    frame->opaque = dpo;
+    return 0;
+}
+
 int drmprime_out_display(drmprime_out_env_t *de, struct AVFrame *src_frame)
 {
     AVFrame *frame;
+    bool is_prime = true;
 
     if ((src_frame->flags & AV_FRAME_FLAG_CORRUPT) != 0) {
         fprintf(stderr, "Discard corrupt frame: fmt=%d, ts=%" PRId64 "\n", src_frame->format, src_frame->pts);
@@ -78,17 +139,24 @@ int drmprime_out_display(drmprime_out_env_t *de, struct AVFrame *src_frame)
             av_frame_free(&frame);
             return AVERROR(EINVAL);
         }
-    } else {
-        fprintf(stderr, "Frame (format=%d) not DRM_PRiME\n", src_frame->format);
+    } else if (src_frame->opaque == de) {
+        is_prime = false;
+    }
+    else {
+        fprintf(stderr, "Frame (format=%d) not DRM_PRiME & frame->opaque not ours\n", src_frame->format);
         return AVERROR(EINVAL);
     }
 
     drmu_env_queue_wait(de->du);
     {
         drmu_atomic_t * da = drmu_atomic_new(de->du);
-        drmu_fb_t * dfb = drmu_fb_av_new_frame_attach(de->du, src_frame);
+        drmu_fb_t * dfb = is_prime ?
+            drmu_fb_av_new_frame_attach(de->du, src_frame) :
+            drmu_fb_ref(((gb2_dmabuf_t *)src_frame->buf[0]->data)->fb);
         const drmu_mode_simple_params_t *const sp = drmu_output_mode_simple_params(de->dout);
         drmu_rect_t r = drmu_rect_wh(sp->width, sp->height);
+
+        drmu_fb_write_end(dfb); // Needed for mapped dmabufs, noop otherwise
 
         if (de->dp == NULL) {
             de->dp = drmu_output_plane_ref_format(de->dout, 0, drmu_fb_pixel_format(dfb), drmu_fb_modifier(dfb, 0));
@@ -169,7 +237,7 @@ int drmprime_out_modeset(drmprime_out_env_t * de, int w, int h, const AVRational
 
 void drmprime_out_delete(drmprime_out_env_t *de)
 {
-    drmu_pool_delete(&de->pic_pool);
+    drmu_dmabuf_unref(&de->dde);
     drmu_plane_unref(&de->dp);
     drmu_output_unref(&de->dout);
     drmu_env_unref(&de->du);
@@ -221,12 +289,12 @@ drmprime_out_env_t* drmprime_out_new()
 
     drmu_output_max_bpc_allow(de->dout, true);
 
-    if ((de->pic_pool = drmu_pool_new(de->du, 5)) == NULL)
+    if ((de->dde = drmu_dmabuf_env_new_video(de->du)) == NULL)
         goto fail;
 
     // Plane allocation delayed till we have a format - not all planes are idempotent
 
-    runcube_drmu(de->dout);
+//    runcube_drmu(de->dout);
 
     return de;
 

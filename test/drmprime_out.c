@@ -148,6 +148,9 @@ int drmprime_out_display(drmprime_out_env_t *de, struct AVFrame *src_frame)
 
         drmu_fb_write_end(dfb); // Needed for mapped dmabufs, noop otherwise
 
+        if (!is_prime)
+            drmu_av_fb_frame_metadata_set(dfb, src_frame);
+
         if (de->dp == NULL) {
             de->dp = drmu_output_plane_ref_format(de->dout, 0, drmu_fb_pixel_format(dfb), drmu_fb_modifier(dfb, 0));
             if (!de->dp) {

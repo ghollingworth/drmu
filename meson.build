@@ -154,6 +154,7 @@ drmu_gbm = library('drmu_gbm',
 drmu_incs = include_directories('drmu', 'pollqueue')
 
 subdir('cube')
+subdir('freetype')
 
 executable(
 	'hello_drmu',

@@ -73,7 +73,9 @@ drmu_env_t * drmu_output_env(const drmu_output_t * const dout);
 // Takes a ref on the env  (released when the output is deleted)
 drmu_output_t * drmu_output_new(drmu_env_t * const du);
 
-// Unref an output
+// Increment ref count on an output - cannot fail
+drmu_output_t * drmu_output_ref(drmu_output_t * const dout);
+// Unref an output - delete if ref count now zero
 void drmu_output_unref(drmu_output_t ** const ppdout);
 
 #ifdef __cplusplus

@@ -28,6 +28,9 @@ struct ticker_env_s {
     drmu_plane_t *dp;
     drmu_fb_t *dfbs[2];
 
+    uint32_t format;
+    uint64_t modifier;
+
     drmu_rect_t pos;
 
     FT_Library    library;
@@ -41,7 +44,9 @@ struct ticker_env_s {
     int shl;
 
     int           target_height;
+    int           target_width;
     int           n, num_chars;
+    unsigned int bb_width;
     int crop_w;
 
     ticker_next_char_fn next_char_fn;
@@ -115,10 +120,14 @@ do_scroll(ticker_env_t *const te)
     if (te->shl > 0)
     {
         drmu_fb_t *const fb0 = te->dfbs[te->bn];
-        int crop_w = 99; // **********
 
         drmu_atomic_t *da = drmu_atomic_new(te->du);
-        drmu_fb_crop_frac_set(fb0, drmu_rect_shl16((drmu_rect_t) { .x = MAX(0, (int)drmu_fb_width(fb0) - crop_w - te->shl), .y = 0, .w = crop_w, .h = te->pos.h }));
+        printf("tw=%d, pos.w=%d, shl=%d, x=%d\n",
+               te->target_width, (int)te->pos.w, te->shl,
+               te->target_width - (int)te->pos.w - te->shl);
+        drmu_fb_crop_frac_set(fb0, drmu_rect_shl16((drmu_rect_t) {
+                                                       .x = MAX(0, te->target_width - (int)te->pos.w - te->shl), .y = 0,
+                                                       .w = te->pos.w, .h = te->pos.h }));
         drmu_atomic_plane_add_fb(da, te->dp, fb0, te->pos);
         drmu_atomic_queue(&da);
         --te->shl;
@@ -172,7 +181,7 @@ do_render(ticker_env_t *const te)
         return -1;
     }
 
-    te->shl = (te->pen.x >> 6) + MAX(slot->bitmap.width, slot->advance.x >> 6) - te->pos.w;
+    te->shl = (te->pen.x >> 6) + MAX(slot->bitmap.width, slot->advance.x >> 6) - te->target_width;
     if (te->shl > 0)
     {
         te->pen.x -= te->shl << 6;
@@ -185,7 +194,7 @@ do_render(ticker_env_t *const te)
     /* increment pen position */
     te->pen.x += slot->advance.x;
 
-    printf("%ld, %ld, left=%d, top=%d\n", te->pen.x, te->pen.y, slot->bitmap_left, slot->bitmap_top);
+//    printf("%ld, %ld, left=%d, top=%d\n", te->pen.x, te->pen.y, slot->bitmap_left, slot->bitmap_top);
 
     te->bn ^= 1;
     te->state = TICKER_SCROLL;
@@ -238,9 +247,27 @@ ticker_delete(ticker_env_t **ppTicker)
 }
 
 int
-ticker_set_face(ticker_env_t *const te, const char *const filename, const unsigned int size_req)
+ticker_init(ticker_env_t *const te)
 {
-    unsigned int size = size_req == 0 ? te->pos.h / 2 : size_req;
+    for (unsigned int i = 0; i != 2; ++i)
+    {
+        if ((te->dfbs[i] = drmu_fb_new_dumb_mod(te->du, te->target_width, te->pos.h, te->format, te->modifier)) == NULL)
+        {
+            drmu_err(te->du, "Failed to get frame buffer");
+            return -1;
+        }
+    }
+
+    memset(drmu_fb_data(te->dfbs[0], 0), 0x80, drmu_fb_height(te->dfbs[0]) * drmu_fb_pitch(te->dfbs[0], 0));
+    return 0;
+}
+
+int
+ticker_set_face(ticker_env_t *const te, const char *const filename)
+{
+    const FT_Pos buf_height = te->pos.h - 2; // Allow 1 pixel T&B for rounding
+    FT_Pos scaled_size;
+    FT_Pos bb_height;
 
 // https://freetype.org/freetype2/docs/tutorial/step2.html
 
@@ -250,15 +277,23 @@ ticker_set_face(ticker_env_t *const te, const char *const filename, const unsign
         return -1;
     }
 
-    if (FT_Set_Pixel_Sizes(te->face, 0, size))
+    bb_height = te->face->bbox.yMax - te->face->bbox.yMin;
+    te->bb_width = FT_MulDiv(te->face->bbox.xMax - te->face->bbox.xMin, buf_height, bb_height);
+    scaled_size = FT_MulDiv(te->face->units_per_EM, buf_height, bb_height);
+
+//    printf("UPer Em=%d, scaled=%ld, height=%ld\n", te->face->units_per_EM, scaled_size, buf_height);
+//    printf("BBox=%ld,%ld->%ld,%ld =%ld, bb_scaled_w=%d\n", te->face->bbox.xMin, te->face->bbox.yMin, te->face->bbox.xMax, te->face->bbox.yMax, bb_height, te->bb_width);
+
+    if (FT_Set_Pixel_Sizes(te->face, 0, scaled_size))
     {
         drmu_err(te->du, "Bad char size\n");
         return -1;
     }
 
-    te->pen.x = te->pos.w * 64;
-    te->pen.y = (te->pos.h - size) * 32; // 64/2
-    te->target_height = te->pos.h - -size / 2; // Top for rendering purposes
+    te->pen.y =  FT_MulDiv(-te->face->bbox.yMin * 32, buf_height, bb_height) + 32;
+    te->target_height = (int)((FT_Pos)te->pos.h - (te->pen.y >> 6)); // Top for rendering purposes
+    te->target_width = MAX(te->bb_width, te->pos.w) + te->bb_width;
+    te->pen.x = te->target_width * 64; // Start with X pos @ far right hand side
 
     te->use_kerning = FT_HAS_KERNING(te->face);
     return 0;
@@ -267,8 +302,6 @@ ticker_set_face(ticker_env_t *const te, const char *const filename, const unsign
 ticker_env_t*
 ticker_new(drmu_output_t *dout, unsigned int x, unsigned int y, unsigned int w, unsigned int h)
 {
-    const uint32_t format = DRM_FORMAT_ARGB8888;
-    const uint64_t modifier = DRM_FORMAT_MOD_LINEAR;
     ticker_env_t *te = calloc(1, sizeof(*te));
 
     if (te == NULL)
@@ -278,6 +311,8 @@ ticker_new(drmu_output_t *dout, unsigned int x, unsigned int y, unsigned int w, 
     te->du = drmu_output_env(dout);
 
     te->pos = (drmu_rect_t) { x, y, w, h };
+    te->format = DRM_FORMAT_ARGB8888;
+    te->modifier = DRM_FORMAT_MOD_LINEAR;
 
     if (FT_Init_FreeType(&te->library) != 0)
     {
@@ -286,22 +321,12 @@ ticker_new(drmu_output_t *dout, unsigned int x, unsigned int y, unsigned int w, 
     }
 
     // This doesn't really want to be the primary
-    if ((te->dp = drmu_output_plane_ref_format(te->dout, DRMU_PLANE_TYPE_OVERLAY, format, modifier)) == NULL)
+    if ((te->dp = drmu_output_plane_ref_format(te->dout, DRMU_PLANE_TYPE_OVERLAY, te->format, te->modifier)) == NULL)
     {
         drmu_err(te->du, "Failed to find output plane");
         goto fail;
     }
 
-    for (unsigned int i = 0; i != 2; ++i)
-    {
-        if ((te->dfbs[i] = drmu_fb_new_dumb_mod(te->du, w, h, format, modifier)) == NULL)
-        {
-            drmu_err(te->du, "Failed to get frame buffer");
-            goto fail;
-        }
-    }
-
-    memset(drmu_fb_data(te->dfbs[0], 0), 0x80, w * h * 4); // ????
 
     return te;
 

@@ -13,9 +13,10 @@ struct drmu_output_s;
 typedef int (* ticker_next_char_fn)(void * v);
 
 ticker_env_t * ticker_new(struct drmu_output_s * dout, unsigned int x, unsigned int t, unsigned int w, unsigned int h);
-int ticker_set_face(ticker_env_t * const te, const char * const filename, const unsigned int size);
-
+int ticker_set_face(ticker_env_t * const te, const char * const filename);
 void ticker_next_char_cb_set(ticker_env_t * const ticker, const ticker_next_char_fn fn, void * const v);
+int ticker_init(ticker_env_t *const te);
+
 int ticker_run(ticker_env_t * const ticker);
 void ticker_delete(ticker_env_t ** ppTicker);
 

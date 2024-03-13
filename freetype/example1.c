@@ -100,13 +100,19 @@ main( int     argc,
     return 1;
   }
 
-  if (ticker_set_face(dfte->te, filename, 0) != 0)
+  if (ticker_set_face(dfte->te, filename) != 0)
   {
     fprintf(stderr, "Failed to set face\n");
     return 1;
   }
 
   ticker_next_char_cb_set(dfte->te, next_char_cb, dfte);
+
+  if (ticker_init(dfte->te) != 0)
+  {
+    fprintf(stderr, "Failed to init ticker\n");
+    return 1;
+  }
 
   while (ticker_run(dfte->te) >= 0)
   {

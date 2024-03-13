@@ -274,6 +274,7 @@ uint32_t drmu_fb_pitch(const drmu_fb_t *const dfb, const unsigned int layer);
 uint32_t drmu_fb_pitch2(const drmu_fb_t *const dfb, const unsigned int layer);
 void * drmu_fb_data(const drmu_fb_t *const dfb, const unsigned int layer);
 drmu_bo_t * drmu_fb_bo(const drmu_fb_t * const dfb, const unsigned int layer);
+// Allocated width height - may be rounded up from requested w/h
 uint32_t drmu_fb_width(const drmu_fb_t *const dfb);
 uint32_t drmu_fb_height(const drmu_fb_t *const dfb);
 // Set cropping (fractional) - x, y, relative to active x, y (and must be +ve)

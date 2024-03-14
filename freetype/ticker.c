@@ -198,9 +198,7 @@ do_render(ticker_env_t *const te)
     if (te->use_kerning && te->previous && glyph_index)
     {
         FT_Vector delta = { 0, 0 };
-
         FT_Get_Kerning(te->face, te->previous, glyph_index, FT_KERNING_DEFAULT, &delta);
-
         te->pen.x += delta.x;
     }
 
@@ -212,23 +210,22 @@ do_render(ticker_env_t *const te)
     }
 
     drmu_fb_write_start(fb0);
-    shl1 = (te->pen.x >> 6) + MAX(slot->bitmap.width, slot->advance.x >> 6) - te->target_width;
+    shl1 = MAX(slot->bitmap_left + slot->bitmap.width, (te->pen.x + slot->advance.x) >> 6) - te->target_width;
     if (shl1 > 0)
     {
         te->pen.x -= shl1 << 6;
         shift_2d(drmu_fb_data(fb0, 0), drmu_fb_data(fb1, 0), drmu_fb_pitch(fb0, 0), shl1 * 4, drmu_fb_height(fb0));
     }
 
-    /* now, draw to our target surface (convert position) */
-    draw_bitmap(fb0, &slot->bitmap, te->pen.x >> 6, te->target_height - slot->bitmap_top);
+    // now, draw to our target surface (convert position)
+    draw_bitmap(fb0, &slot->bitmap, slot->bitmap_left - shl1, te->target_height - slot->bitmap_top);
     drmu_fb_write_end(fb0);
 
     /* increment pen position */
     te->pen.x += slot->advance.x;
     te->shl += shl1;
 
-//    printf("%ld, %ld, left=%d, top=%d\n", te->pen.x, te->pen.y, slot->bitmap_left, slot->bitmap_top);
-
+    te->previous = glyph_index;
     te->bn ^= 1;
     te->state = TICKER_SCROLL;
     return 1;

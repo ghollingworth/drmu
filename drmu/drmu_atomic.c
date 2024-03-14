@@ -36,7 +36,7 @@ typedef struct aprop_hdr_s {
 typedef struct atomic_cb_s {
     struct atomic_cb_s * next;
     void * v;
-    void (* cb)(void * v);
+    drmu_atomic_commit_fn * cb;
 } atomic_cb_t;
 
 typedef struct drmu_atomic_s {
@@ -57,7 +57,7 @@ max_uint(const unsigned int a, const unsigned int b)
 }
 
 atomic_cb_t *
-atomic_cb_new(void (* cb)(void * v), void * v)
+atomic_cb_new(drmu_atomic_commit_fn * cb, void * v)
 {
     atomic_cb_t * acb = malloc(sizeof(*acb));
     if (acb == NULL)
@@ -576,14 +576,16 @@ drmu_prop_fn_null_commit(void * v, uint64_t value)
 }
 
 int
-drmu_atomic_add_commit_callback(drmu_atomic_t * const da, void (* cb)(void * v), void * v)
+drmu_atomic_add_commit_callback(drmu_atomic_t * const da, drmu_atomic_commit_fn * const cb, void * const v)
 {
-    atomic_cb_t * acb = atomic_cb_new(cb, v);
-    if (acb == NULL)
-        return -ENOMEM;
+    if (cb) {
+        atomic_cb_t *acb = atomic_cb_new(cb, v);
+        if (acb == NULL)
+            return -ENOMEM;
 
-    *da->commit_cb_last_ptr = acb;
-    da->commit_cb_last_ptr = &acb->next;
+        *da->commit_cb_last_ptr = acb;
+        da->commit_cb_last_ptr = &acb->next;
+    }
 
     return 0;
 }

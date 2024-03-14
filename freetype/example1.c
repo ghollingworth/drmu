@@ -1,13 +1,15 @@
-/* example1.c                                                      */
-/*                                                                 */
-/* This small program shows how to print a rotated string with the */
-/* FreeType 2 library.                                             */
+/* Simple example program that uses ticker to scroll a message across the
+ * screen
+ */
 
-
+#include <errno.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <stdio.h>
 #include <string.h>
-#include <math.h>
 #include <unistd.h>
+
+#include <sys/eventfd.h>
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -28,6 +30,7 @@ typedef struct dft_env_s {
   ticker_env_t * te;
   const char * text;
   const char * cchar;
+  int prod_fd;
 } dft_env_t;
 
 static void
@@ -55,6 +58,14 @@ next_char_cb(void * v)
   return *dfte->cchar++;
 }
 
+static void
+do_prod(void * v)
+{
+  static const uint64_t one = 1;
+  dft_env_t * const dfte = v;
+  write(dfte->prod_fd, &one, sizeof(one));
+}
+
 int
 main( int     argc,
       char**  argv )
@@ -62,6 +73,7 @@ main( int     argc,
   dft_env_t * dfte = calloc(1, sizeof(*dfte));
   drmu_env_t * du;
   drmu_output_t * dout;
+  int trv;
 
   const char * const device = NULL;
   const char * filename;
@@ -109,20 +121,50 @@ main( int     argc,
 
   ticker_next_char_cb_set(dfte->te, next_char_cb, dfte);
 
+  if ((dfte->prod_fd = eventfd(0, EFD_NONBLOCK)) == -1)
+  {
+    fprintf(stderr, "Failed to get event fd\n");
+    return 1;
+  }
+  ticker_commit_cb_set(dfte->te, do_prod, dfte);
+
   if (ticker_init(dfte->te) != 0)
   {
     fprintf(stderr, "Failed to init ticker\n");
     return 1;
   }
 
-  while (ticker_run(dfte->te) >= 0)
+  while ((trv = ticker_run(dfte->te)) >= 0)
   {
-    usleep(30000);
+    char evt_buf[8];
+    int rv;
+
+    struct pollfd pf[2] = {
+      {.fd = dfte->prod_fd, .events = POLLIN, .revents = 0},
+      {.fd = STDIN_FILENO, .events = POLLIN, .revents = 0},
+    };
+
+    while ((rv = poll(pf, 2, -1)) < 0 && errno == EINTR)
+      /* loop */;
+
+    /* 0 = timeout but that should never happen */
+    if (rv <= 0) {
+      fprintf(stderr, "Poll failure\n");
+      break;
+    }
+
+    /* Keypress */
+    if (pf[1].revents != 0)
+      break;
+
+    read(dfte->prod_fd, evt_buf, 8);
   }
 
-  getchar();
+  if (trv < 0)
+    getchar();
 
   ticker_delete(&dfte->te);
+  close(dfte->prod_fd);
   free(dfte);
   return 0;
 }

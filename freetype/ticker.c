@@ -1,3 +1,10 @@
+/* Simple scrolling ticker
+ * Freetype portion heavily derived from the example code in the the Freetype
+ * tutorial.
+ * Freetype usage is basic - could easily be improved to have things like
+ * different colour outlines, rendering in RGB rather than grey etc.
+ */
+
 #include "ticker.h"
 
 #include <stdio.h>
@@ -8,9 +15,10 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
-#include "drmu.h"
-#include "drmu_log.h"
-#include "drmu_output.h"
+#include <drmu.h>
+#include <drmu_dmabuf.h>
+#include <drmu_log.h>
+#include <drmu_output.h>
 
 #include <drm_fourcc.h>
 
@@ -27,6 +35,7 @@ struct ticker_env_s {
     drmu_output_t *dout;
     drmu_plane_t *dp;
     drmu_fb_t *dfbs[2];
+    drmu_dmabuf_env_t *dde;
 
     uint32_t format;
     uint64_t modifier;
@@ -48,8 +57,11 @@ struct ticker_env_s {
     int           target_width;
     unsigned int bb_width;
 
-    ticker_next_char_fn next_char_fn;
+    ticker_next_char_fn next_char_cb;
     void *next_char_v;
+
+    drmu_atomic_commit_fn * commit_cb;
+    void * commit_v;
 };
 
 #ifndef MIN
@@ -81,12 +93,10 @@ draw_bitmap(drmu_fb_t *const dfb,
     /* for simplicity, we assume that `bitmap->pixel_mode' */
     /* is `FT_PIXEL_MODE_GRAY' (i.e., not a bitmap font)   */
 
-    for (i = x, p = 0; i < x_max; i++, p++)
+    for (j = y, q = 0; j < y_max; j++, q++)
     {
-        for (j = y, q = 0; j < y_max; j++, q++)
-        {
+        for (i = x, p = 0; i < x_max; i++, p++)
             image[j * fb_stride + i] |= grey2argb(bitmap->buffer[q * bitmap->width + p]);
-        }
     }
 }
 
@@ -109,8 +119,15 @@ shift_2d(void *dst, const void *src, size_t stride, size_t offset, size_t h)
 void
 ticker_next_char_cb_set(ticker_env_t *const te, const ticker_next_char_fn fn, void *const v)
 {
-    te->next_char_fn = fn;
+    te->next_char_cb = fn;
     te->next_char_v = v;
+}
+
+void
+ticker_commit_cb_set(ticker_env_t *const te, void (* commit_cb)(void * v), void * commit_v)
+{
+    te->commit_cb = commit_cb;
+    te->commit_v = commit_v;
 }
 
 static int
@@ -133,6 +150,8 @@ do_scroll(ticker_env_t *const te)
                                                        .x = MAX(0, te->target_width - (int)te->pos.w - te->shl), .y = 0,
                                                        .w = te->pos.w, .h = te->pos.h }));
         drmu_atomic_plane_add_fb(da, te->dp, fb0, te->pos);
+        if (te->commit_cb)
+            drmu_atomic_add_commit_callback(da, te->commit_cb, te->commit_v);
         drmu_atomic_queue(&da);
 
         te->shl -= te->shl_per_run;
@@ -159,7 +178,7 @@ do_render(ticker_env_t *const te)
     /* set transformation */
     FT_Set_Transform(te->face, &matrix, &te->pen);
 
-    c = te->next_char_fn(te->next_char_v);
+    c = te->next_char_cb(te->next_char_v);
     if (c <= 0)
     {
         // If the window didn't quite get to end end of the buffer on last
@@ -192,6 +211,7 @@ do_render(ticker_env_t *const te)
         return -1;
     }
 
+    drmu_fb_write_start(fb0);
     shl1 = (te->pen.x >> 6) + MAX(slot->bitmap.width, slot->advance.x >> 6) - te->target_width;
     if (shl1 > 0)
     {
@@ -201,6 +221,7 @@ do_render(ticker_env_t *const te)
 
     /* now, draw to our target surface (convert position) */
     draw_bitmap(fb0, &slot->bitmap, te->pen.x >> 6, te->target_height - slot->bitmap_top);
+    drmu_fb_write_end(fb0);
 
     /* increment pen position */
     te->pen.x += slot->advance.x;
@@ -251,6 +272,7 @@ ticker_delete(ticker_env_t **ppTicker)
 
     drmu_fb_unref(te->dfbs + 0);
     drmu_fb_unref(te->dfbs + 1);
+    drmu_dmabuf_env_unref(&te->dde);
     drmu_plane_unref(&te->dp);
     drmu_output_unref(&te->dout);
 
@@ -265,14 +287,19 @@ ticker_init(ticker_env_t *const te)
 {
     for (unsigned int i = 0; i != 2; ++i)
     {
-        if ((te->dfbs[i] = drmu_fb_new_dumb_mod(te->du, te->target_width, te->pos.h, te->format, te->modifier)) == NULL)
+        te->dfbs[i] = te->dde == NULL ?
+            drmu_fb_new_dumb_mod(te->du, te->target_width, te->pos.h, te->format, te->modifier) :
+            drmu_fb_new_dmabuf_mod(te->dde, te->target_width, te->pos.h, te->format, te->modifier);
+        if (te->dfbs[i] == NULL)
         {
             drmu_err(te->du, "Failed to get frame buffer");
             return -1;
         }
     }
 
+    drmu_fb_write_start(te->dfbs[0]);
     memset(drmu_fb_data(te->dfbs[0], 0), 0x00, drmu_fb_height(te->dfbs[0]) * drmu_fb_pitch(te->dfbs[0], 0));
+    drmu_fb_write_end(te->dfbs[0]);
     return 0;
 }
 
@@ -330,6 +357,7 @@ ticker_new(drmu_output_t *dout, unsigned int x, unsigned int y, unsigned int w, 
 
     te->dout = drmu_output_ref(dout);
     te->du = drmu_output_env(dout);
+    te->dde = drmu_dmabuf_env_new_video(te->du);
 
     te->pos = (drmu_rect_t) { x, y, w, h };
     te->format = DRM_FORMAT_ARGB8888;

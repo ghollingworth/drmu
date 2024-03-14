@@ -32,6 +32,7 @@ main(int argc, char **argv)
     drmu_env_t *du;
     drmu_output_t *dout;
     runticker_env_t * rte;
+    const drmu_mode_simple_params_t * mode;
 
     const char *const device = NULL;
 
@@ -52,7 +53,11 @@ main(int argc, char **argv)
     }
     drmu_env_restore_enable(du);
 
-    if ((rte = runticker_start(dout, 0, 128, 720, 128, argv[2], argv[1])) == NULL) {
+    mode = drmu_output_mode_simple_params(dout);
+
+    if ((rte = runticker_start(dout,
+                               mode->width / 10, mode->height * 8/10, mode->width * 8/10, mode->height / 10,
+                               argv[2], argv[1])) == NULL) {
         fprintf(stderr, "Failed to create ticker\n");
         return 1;
     }

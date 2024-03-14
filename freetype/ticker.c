@@ -40,14 +40,13 @@ struct ticker_env_s {
     FT_Bool use_kerning;
     FT_UInt previous;
 
-    unsigned int bn;
-    int shl;
+    unsigned int bn;  // Buffer for render
+    int shl;          // Scroll left amount (-ve => need a new char)
+    int shl_per_run;  // Amount to scroll per run
 
     int           target_height;
     int           target_width;
-    int           n, num_chars;
     unsigned int bb_width;
-    int crop_w;
 
     ticker_next_char_fn next_char_fn;
     void *next_char_v;
@@ -117,26 +116,28 @@ ticker_next_char_cb_set(ticker_env_t *const te, const ticker_next_char_fn fn, vo
 static int
 do_scroll(ticker_env_t *const te)
 {
-    if (te->shl > 0)
+    if (te->shl < 0)
+    {
+        te->state = TICKER_NEXT_CHAR;
+        return 1;
+    }
+    else
     {
         drmu_fb_t *const fb0 = te->dfbs[te->bn];
 
         drmu_atomic_t *da = drmu_atomic_new(te->du);
-        printf("tw=%d, pos.w=%d, shl=%d, x=%d\n",
-               te->target_width, (int)te->pos.w, te->shl,
-               te->target_width - (int)te->pos.w - te->shl);
+//        printf("tw=%d, pos.w=%d, shl=%d, x=%d\n",
+//               te->target_width, (int)te->pos.w, te->shl,
+//               te->target_width - (int)te->pos.w - te->shl);
         drmu_fb_crop_frac_set(fb0, drmu_rect_shl16((drmu_rect_t) {
                                                        .x = MAX(0, te->target_width - (int)te->pos.w - te->shl), .y = 0,
                                                        .w = te->pos.w, .h = te->pos.h }));
         drmu_atomic_plane_add_fb(da, te->dp, fb0, te->pos);
         drmu_atomic_queue(&da);
-        --te->shl;
+
+        te->shl -= te->shl_per_run;
+        return 0;
     }
-
-    if (te->shl <= 0)
-        te->state = TICKER_NEXT_CHAR;
-
-    return 0;
 }
 
 static int
@@ -153,13 +154,23 @@ do_render(ticker_env_t *const te)
     int c;
     drmu_fb_t *const fb1 = te->dfbs[te->bn];
     drmu_fb_t *const fb0 = te->dfbs[te->bn ^ 1];
+    int shl1;
 
     /* set transformation */
     FT_Set_Transform(te->face, &matrix, &te->pen);
 
     c = te->next_char_fn(te->next_char_v);
     if (c <= 0)
+    {
+        // If the window didn't quite get to end end of the buffer on last
+        // scroll then set it there.
+        if (te->shl + te->shl_per_run > 0)
+        {
+            te->shl = 0;
+            do_scroll(te);
+        }
         return c;
+    }
 
     /* convert character code to glyph index */
     glyph_index = FT_Get_Char_Index(te->face, c);
@@ -181,11 +192,11 @@ do_render(ticker_env_t *const te)
         return -1;
     }
 
-    te->shl = (te->pen.x >> 6) + MAX(slot->bitmap.width, slot->advance.x >> 6) - te->target_width;
-    if (te->shl > 0)
+    shl1 = (te->pen.x >> 6) + MAX(slot->bitmap.width, slot->advance.x >> 6) - te->target_width;
+    if (shl1 > 0)
     {
-        te->pen.x -= te->shl << 6;
-        shift_2d(drmu_fb_data(fb0, 0), drmu_fb_data(fb1, 0), drmu_fb_pitch(fb0, 0), te->shl * 4, drmu_fb_height(fb0));
+        te->pen.x -= shl1 << 6;
+        shift_2d(drmu_fb_data(fb0, 0), drmu_fb_data(fb1, 0), drmu_fb_pitch(fb0, 0), shl1 * 4, drmu_fb_height(fb0));
     }
 
     /* now, draw to our target surface (convert position) */
@@ -193,31 +204,34 @@ do_render(ticker_env_t *const te)
 
     /* increment pen position */
     te->pen.x += slot->advance.x;
+    te->shl += shl1;
 
 //    printf("%ld, %ld, left=%d, top=%d\n", te->pen.x, te->pen.y, slot->bitmap_left, slot->bitmap_top);
 
     te->bn ^= 1;
     te->state = TICKER_SCROLL;
-    return 0;
+    return 1;
 }
 
 int
 ticker_run(ticker_env_t *const te)
 {
     int rv = -1;
-    switch (te->state)
+    do
     {
-        case TICKER_NEW:
-        case TICKER_NEXT_CHAR:
-            if ((rv = do_render(te)) < 0)
+        switch (te->state)
+        {
+            case TICKER_NEW:
+            case TICKER_NEXT_CHAR:
+                rv = do_render(te);
                 break;
-            /* FALLTHRU */
-        case TICKER_SCROLL:
-            rv = do_scroll(te);
-            break;
-        default:
-            break;
-    }
+            case TICKER_SCROLL:
+                rv = do_scroll(te);
+                break;
+            default:
+                break;
+        }
+    } while (rv == 1);
     return rv;
 }
 
@@ -258,7 +272,7 @@ ticker_init(ticker_env_t *const te)
         }
     }
 
-    memset(drmu_fb_data(te->dfbs[0], 0), 0x80, drmu_fb_height(te->dfbs[0]) * drmu_fb_pitch(te->dfbs[0], 0));
+    memset(drmu_fb_data(te->dfbs[0], 0), 0x00, drmu_fb_height(te->dfbs[0]) * drmu_fb_pitch(te->dfbs[0], 0));
     return 0;
 }
 
@@ -299,6 +313,13 @@ ticker_set_face(ticker_env_t *const te, const char *const filename)
     return 0;
 }
 
+int
+ticker_set_shl(ticker_env_t *const te, unsigned int shift_pels)
+{
+    te->shl_per_run = shift_pels;
+    return 0;
+}
+
 ticker_env_t*
 ticker_new(drmu_output_t *dout, unsigned int x, unsigned int y, unsigned int w, unsigned int h)
 {
@@ -313,6 +334,7 @@ ticker_new(drmu_output_t *dout, unsigned int x, unsigned int y, unsigned int w, 
     te->pos = (drmu_rect_t) { x, y, w, h };
     te->format = DRM_FORMAT_ARGB8888;
     te->modifier = DRM_FORMAT_MOD_LINEAR;
+    te->shl_per_run = 3;
 
     if (FT_Init_FreeType(&te->library) != 0)
     {

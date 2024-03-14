@@ -99,6 +99,7 @@ main( int     argc,
     fprintf(stderr, "Failed to create ticker\n");
     return 1;
   }
+  drmu_output_unref(&dout); // Ticker keeps a ref
 
   if (ticker_set_face(dfte->te, filename) != 0)
   {

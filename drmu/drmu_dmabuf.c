@@ -139,16 +139,21 @@ void drmu_dmabuf_env_unref(drmu_dmabuf_env_t ** const ppdde)
 drmu_dmabuf_env_t *
 drmu_dmabuf_env_new_fd(struct drmu_env_s * const du, const int fd)
 {
-    drmu_dmabuf_env_t * const dde = calloc(1, sizeof(*dde));
-    if (dde == NULL) {
-        close(fd);
+    if (fd == -1) {
         return NULL;
     }
-    dde->du = drmu_env_ref(du);
-    dde->fd = fd;
-    dde->page_size = (size_t)sysconf(_SC_PAGE_SIZE);
+    else {
+        drmu_dmabuf_env_t *const dde = calloc(1, sizeof(*dde));
+        if (dde == NULL) {
+            close(fd);
+            return NULL;
+        }
+        dde->du = drmu_env_ref(du);
+        dde->fd = fd;
+        dde->page_size = (size_t)sysconf(_SC_PAGE_SIZE);
 
-    return dde;
+        return dde;
+    }
 }
 
 drmu_dmabuf_env_t *
@@ -163,9 +168,9 @@ drmu_dmabuf_env_new_video(struct drmu_env_s * const du)
     const char * const * pfname;
 
     for (pfname = names; pfname != NULL; ++pfname) {
-        int fd = open(*pfname, O_RDWR | O_CLOEXEC);
-        drmu_dmabuf_env_t * dde;
-        if (fd != -1 && (dde = drmu_dmabuf_env_new_fd(du, fd)) != NULL)
+        const int fd = open(*pfname, O_RDWR | O_CLOEXEC);
+        drmu_dmabuf_env_t * const dde = drmu_dmabuf_env_new_fd(du, fd);
+        if (dde != NULL)
             return dde;
     }
     return NULL;
@@ -187,6 +192,8 @@ pool_dmabuf_on_delete_cb(void * const v)
 drmu_pool_t *
 drmu_pool_new_dmabuf(drmu_dmabuf_env_t * dde, unsigned int total_fbs_max)
 {
+    if (dde == NULL)
+        return NULL;
     return drmu_pool_new_alloc(dde->du, total_fbs_max,
                                pool_dmabuf_alloc_cb, pool_dmabuf_on_delete_cb, drmu_dmabuf_env_ref(dde));
 }

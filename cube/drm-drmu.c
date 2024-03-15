@@ -11,7 +11,6 @@
 #include "drm-common.h"
 
 #include "drmu.h"
-#include "drmu_gbm.h"
 #include "drmu_log.h"
 #include "drmu_output.h"
 #include "drmu_scan.h"
@@ -40,16 +39,40 @@ commit_cb(void * v)
     sem_post(&drm->commit_sem);
 }
 
+void cube_run_drmu(struct drm * const drm, const struct gbm * const gbm, const struct egl * const egl)
+{
+    glBindFramebuffer(GL_FRAMEBUFFER, egl->fbs[drm->buf_no].fb);
+
+    egl->draw(drm->run_no++);
+
+    glFinish();
+
+    /*
+     * Here you could also update drm plane layers if you want
+     * hw composition
+     */
+
+    {
+        drmu_atomic_t * da = drmu_atomic_new(drm->du);
+        drmu_atomic_plane_add_fb(da, drm->dp, gbm->dfbs[drm->buf_no], drmu_rect_wh(drm->mode->hdisplay / 2, drm->mode->vdisplay / 2));
+        drmu_atomic_add_commit_callback(da, commit_cb, drm);
+        drmu_atomic_queue(&da);
+    }
+
+    drm->buf_no = drm->buf_no + 1 >= NUM_BUFFERS ? 0 : drm->buf_no + 1;
+
+    sem_wait(&drm->commit_sem);
+}
+
 static int run_drmu(const struct gbm *gbm, const struct egl *egl)
 {
     struct drm * const drm = &drm_static;
     unsigned int i;
-    unsigned int n;
 	int64_t start_time, report_time, cur_time;
 
 	start_time = report_time = get_time_ns();
 
-	for (i = 0,  n = 0; i < drm->count; ++i, n = n >= NUM_BUFFERS - 1 ? 0 : n + 1) {
+	for (i = 0 ; i < drm->count; ++i) {
 
 		/* Start fps measuring on second frame, to remove the time spent
 		 * compiling shader, etc, from the fps:
@@ -58,24 +81,7 @@ static int run_drmu(const struct gbm *gbm, const struct egl *egl)
 			start_time = report_time = get_time_ns();
 		}
 
-		glBindFramebuffer(GL_FRAMEBUFFER, egl->fbs[n].fb);
-
-		egl->draw(i);
-
-		glFinish();
-
-		/*
-		 * Here you could also update drm plane layers if you want
-		 * hw composition
-		 */
-
-        {
-            drmu_atomic_t * da = drmu_atomic_new(drm->du);
-            drmu_atomic_plane_add_fb(da, drm->dp, gbm->dfbs[n], drmu_rect_wh(drm->mode->hdisplay / 2, drm->mode->vdisplay / 2));
-            drmu_atomic_add_commit_callback(da, commit_cb, drm);
-            drmu_atomic_queue(&da);
-        }
-        sem_wait(&drm->commit_sem);
+        cube_run_drmu(drm, gbm, egl);
 
 		cur_time = get_time_ns();
 		if (cur_time > (report_time + 2 * NSEC_PER_SEC)) {
@@ -104,7 +110,7 @@ static int run_drmu(const struct gbm *gbm, const struct egl *egl)
 }
 
 
-const struct drm *
+struct drm *
 init_drmu_dout(drmu_output_t * const dout, unsigned int count, const uint32_t format)
 {
     struct drm * drm = &drm_static;
@@ -127,15 +133,6 @@ init_drmu_dout(drmu_output_t * const dout, unsigned int count, const uint32_t fo
     // This doesn't really want to be the primary
     if ((drm->dp = drmu_output_plane_ref_format(drm->dout, DRMU_PLANE_TYPE_OVERLAY, format, 0)) == NULL)
         goto fail;
-
-#if 0
-    {
-        drmu_atomic_t * da = drmu_atomic_new(drm->du);
-        drmu_atomic_plane_add_zpos(da, drm->dp, 100);
-        drmu_atomic_commit(da);
-        drmu_atomic_unref(&da);
-    }
-#endif
 
     sem_init(&drm->commit_sem, 0, 0);
 

@@ -70,6 +70,7 @@ struct drmprime_out_env_s
     int prod_fd;
 
     runticker_env_t * rte;
+    runcube_env_t * rce;
 };
 
 typedef struct gb2_dmabuf_s
@@ -346,11 +347,11 @@ void drmprime_out_runticker_stop(drmprime_out_env_t * const dpo)
 
 void drmprime_out_runcube_start(drmprime_out_env_t * const dpo)
 {
-    runcube_drmu(dpo->dout);
+    dpo->rce = runcube_drmu_start(dpo->dout);
 }
 
 void drmprime_out_runcube_stop(drmprime_out_env_t * const dpo)
 {
-    (void)dpo;
+    runcube_drmu_stop(&dpo->rce);
 }
 

@@ -47,11 +47,13 @@
 
 #include "cube/runcube.h"
 
+#include "freetype/runticker.h"
+
 #define TRACE_ALL 0
 
 #define DRM_MODULE "vc4"
 
-typedef struct drmprime_out_env_s
+struct drmprime_out_env_s
 {
     drmu_env_t * du;
     drmu_output_t * dout;
@@ -61,7 +63,9 @@ typedef struct drmprime_out_env_s
 
     int mode_id;
     drmu_mode_simple_params_t picked;
-} drmprime_out_env_t;
+
+    runticker_env_t * rte;
+};
 
 typedef struct gb2_dmabuf_s
 {
@@ -225,6 +229,11 @@ int drmprime_out_modeset(drmprime_out_env_t * de, int w, int h, const AVRational
     return 0;
 }
 
+struct drmu_output_s * drmprime_out_output(const drmprime_out_env_t * const dpo)
+{
+    return dpo->dout;
+}
+
 void drmprime_out_delete(drmprime_out_env_t *de)
 {
     drmu_pool_unref(&de->pic_pool);
@@ -279,23 +288,10 @@ drmprime_out_env_t* drmprime_out_new()
 
     drmu_output_max_bpc_allow(de->dout, true);
 
-    {
-        drmu_dmabuf_env_t * dde;
-        if ((dde = drmu_dmabuf_env_new_video(de->du)) == NULL)
-            goto fail;
-
-        de->pic_pool = drmu_pool_new_dmabuf(dde, 32);
-
-        // The pool holds a ref - we don't need to hold one ourselves too
-        drmu_dmabuf_env_unref(&dde);
-
-        if (de->pic_pool == NULL)
-            goto fail;
-    }
+    if ((de->pic_pool = drmu_pool_new_dmabuf_video(de->du, 32)) == NULL)
+        goto fail;
 
     // Plane allocation delayed till we have a format - not all planes are idempotent
-
-//    runcube_drmu(de->dout);
 
     return de;
 
@@ -303,5 +299,32 @@ fail:
     drmprime_out_delete(de);
     fprintf(stderr, ">>> %s: FAIL\n", __func__);
     return NULL;
+}
+
+void drmprime_out_runticker_start(drmprime_out_env_t * const dpo, const char * const ticker_text)
+{
+    const drmu_mode_simple_params_t * mode = drmu_output_mode_simple_params(dpo->dout);
+    static const char fontfile[] = "/usr/share/fonts/truetype/freefont/FreeSerif.ttf";
+
+    if ((dpo->rte = runticker_start(dpo->dout,
+                               mode->width / 10, mode->height * 8/10, mode->width * 8/10, mode->height / 10,
+                               ticker_text, fontfile)) == NULL) {
+        fprintf(stderr, "Failed to create ticker\n");
+    }
+}
+
+void drmprime_out_runticker_stop(drmprime_out_env_t * const dpo)
+{
+    runticker_stop(&dpo->rte);
+}
+
+void drmprime_out_runcube_start(drmprime_out_env_t * const dpo)
+{
+    runcube_drmu(dpo->dout);
+}
+
+void drmprime_out_runcube_stop(drmprime_out_env_t * const dpo)
+{
+    (void)dpo;
 }
 

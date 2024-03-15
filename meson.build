@@ -160,7 +160,7 @@ executable(
 	'hello_drmu',
 	'test/hello_drmu.c', 'test/drmprime_out.c',
 	include_directories : drmu_incs,
-	link_with : [ drmu_base, drmu_av ] + drmu_xlease_opt + [ runcube_drmu ],
+	link_with : [ drmu_base, drmu_av ] + drmu_xlease_opt + [ runcube_drmu, runticker_drmu ],
 	dependencies : [
 		threads_dep,
 		libdrm_dep,

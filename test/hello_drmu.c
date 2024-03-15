@@ -51,6 +51,7 @@
 static enum AVPixelFormat hw_pix_fmt;
 static FILE *output_file = NULL;
 static long frames = 0;
+static bool wants_modeset = false;
 
 static AVFilterContext *buffersink_ctx = NULL;
 static AVFilterContext *buffersrc_ctx = NULL;
@@ -139,9 +140,10 @@ static int decode_write(AVCodecContext * const avctx,
                         fprintf(stderr, "Failed to get frame: %s", av_err2str(ret));
                     goto fail;
                 }
-                drmprime_out_modeset(dpo, av_buffersink_get_w(buffersink_ctx), av_buffersink_get_h(buffersink_ctx), av_buffersink_get_time_base(buffersink_ctx));
+                if (wants_modeset)
+                    drmprime_out_modeset(dpo, av_buffersink_get_w(buffersink_ctx), av_buffersink_get_h(buffersink_ctx), av_buffersink_get_time_base(buffersink_ctx));
             }
-            else {
+            else if (wants_modeset) {
                 drmprime_out_modeset(dpo, avctx->coded_width, avctx->coded_height, avctx->framerate);
             }
 
@@ -300,6 +302,9 @@ void usage()
     fprintf(stderr,
             "Usage: hello_drmprime [-l loop_count] [-f <frames>] [-o yuv_output_file]\n"
             "                      [--deinterlace] [--pace-input <hz>]\n"
+            "                      [--modeset]\n"
+            "                      [--ticker <text>]\n"
+            "                      [--cube]\n"
             "                      <input file> [<input_file> ...]\n");
     exit(1);
 }
@@ -330,6 +335,8 @@ int main(int argc, char *argv[])
     bool wants_deinterlace = false;
     long pace_input_hz = 0;
     bool try_hw = true;
+    bool wants_cube = false;
+    const char * ticker_text = NULL;
 
     {
         char * const * a = argv + 1;
@@ -376,6 +383,19 @@ int main(int argc, char *argv[])
             else if (strcmp(arg, "--deinterlace") == 0) {
                 wants_deinterlace = true;
             }
+            else if (strcmp(arg, "--cube") == 0) {
+                wants_cube = true;
+            }
+            else if (strcmp(arg, "--modeset") == 0) {
+                wants_modeset = true;
+            }
+            else if (strcmp(arg, "--ticker") == 0) {
+                if (n == 0)
+                    usage();
+                ticker_text = *a;
+                --n;
+                ++a;
+            }
             else if (strcmp(arg, "--") == 0) {
                 --n;  // If we are going to break out then need to dec count like in the while
                 break;
@@ -416,6 +436,12 @@ int main(int argc, char *argv[])
             return -1;
         }
     }
+
+    if (wants_cube)
+        drmprime_out_runcube_start(dpo);
+
+    if (ticker_text != NULL)
+        drmprime_out_runticker_start(dpo, ticker_text);
 
 loopy:
     in_file = in_filelist[in_n];

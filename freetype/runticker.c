@@ -1,7 +1,6 @@
 #include "runticker.h"
 
 #include <errno.h>
-#include <poll.h>
 #include <pthread.h>
 #include <string.h>
 #include <stdatomic.h>
@@ -52,19 +51,6 @@ runticker_thread(void * v)
 
     while (!atomic_load(&dfte->kill) && ticker_run(dfte->te) >= 0) {
         char evt_buf[8];
-        int rv;
-
-        struct pollfd pf[1] = {
-            { .fd = dfte->prod_fd, .events = POLLIN, .revents = 0 },
-        };
-
-        while ((rv = poll(pf, 1, -1)) < 0 && errno == EINTR)
-            /* loop */;
-
-        /* 0 = timeout but that should never happen */
-        if (rv <= 0)
-            break;
-
         read(dfte->prod_fd, evt_buf, 8);
     }
 
@@ -99,7 +85,7 @@ runticker_start(drmu_output_t * const dout,
 
     ticker_next_char_cb_set(dfte->te, next_char_cb, dfte);
 
-    if ((dfte->prod_fd = eventfd(0, EFD_NONBLOCK)) == -1) {
+    if ((dfte->prod_fd = eventfd(0, 0)) == -1) {
         drmu_err(du, "Failed to get event fd");
         goto fail;
     }

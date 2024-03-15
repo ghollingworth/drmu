@@ -142,14 +142,20 @@ drmu_av = library('drmu_av',
 	],
 )
 
-drmu_gbm = library('drmu_gbm',
-	'drmu/drmu_gbm.c',
-	link_with : drmu_base,
-	dependencies : [
-		threads_dep,
-		dependency('gbm'),
-	],
-)
+gbm_dep = dependency('gbm', required : get_option('gbm'))
+#mesondefine HAS_GBM
+conf_data.set10('HAS_GBM', gbm_dep.found())
+
+if gbm_dep.found()
+	drmu_gbm = library('drmu_gbm',
+		'drmu/drmu_gbm.c',
+		link_with : drmu_base,
+		dependencies : [
+			threads_dep,
+			dependency('gbm'),
+		],
+	)
+endif
 
 drmu_incs = include_directories('drmu', 'pollqueue')
 
@@ -160,7 +166,7 @@ executable(
 	'hello_drmu',
 	'test/hello_drmu.c', 'test/drmprime_out.c',
 	include_directories : drmu_incs,
-	link_with : [ drmu_base, drmu_av ] + drmu_xlease_opt + [ runcube_drmu, runticker_drmu ],
+	link_with : [ drmu_base, drmu_av ] + drmu_xlease_opt + runcube_opt + runticker_opt,
 	dependencies : [
 		threads_dep,
 		libdrm_dep,

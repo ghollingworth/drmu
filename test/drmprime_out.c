@@ -330,6 +330,7 @@ fail:
 
 void drmprime_out_runticker_start(drmprime_out_env_t * const dpo, const char * const ticker_text)
 {
+#if HAS_RUNTICKER
     const drmu_mode_simple_params_t * mode = drmu_output_mode_simple_params(dpo->dout);
     static const char fontfile[] = "/usr/share/fonts/truetype/freefont/FreeSerif.ttf";
 
@@ -338,20 +339,38 @@ void drmprime_out_runticker_start(drmprime_out_env_t * const dpo, const char * c
                                ticker_text, fontfile)) == NULL) {
         fprintf(stderr, "Failed to create ticker\n");
     }
+#else
+    (void)dpo;
+    (void)ticker_text;
+    fprintf(stderr, "Ticker support not compiled\n");
+#endif
 }
 
 void drmprime_out_runticker_stop(drmprime_out_env_t * const dpo)
 {
+#if HAS_RUNTICKER
     runticker_stop(&dpo->rte);
+#else
+    (void)dpo;
+#endif
 }
 
 void drmprime_out_runcube_start(drmprime_out_env_t * const dpo)
 {
+#if HAS_RUNCUBE
     dpo->rce = runcube_drmu_start(dpo->dout);
+#else
+    (void)dpo;
+    fprintf(stderr, "Cube support not compiled\n");
+#endif
 }
 
 void drmprime_out_runcube_stop(drmprime_out_env_t * const dpo)
 {
+#if HAS_RUNCUBE
     runcube_drmu_stop(&dpo->rce);
+#else
+    (void)dpo;
+#endif
 }
 

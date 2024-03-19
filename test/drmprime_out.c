@@ -32,8 +32,6 @@
 #include <pthread.h>
 #include <semaphore.h>
 
-#include <sys/eventfd.h>
-
 #include "libavutil/frame.h"
 #include "libavcodec/avcodec.h"
 #include "libavutil/hwcontext.h"
@@ -66,9 +64,6 @@ struct drmprime_out_env_s
     int mode_id;
     drmu_mode_simple_params_t picked;
 
-    bool prod_wait;
-    int prod_fd;
-
     runticker_env_t * rte;
     runcube_env_t * rce;
 };
@@ -77,14 +72,6 @@ typedef struct gb2_dmabuf_s
 {
     drmu_fb_t * fb;
 } gb2_dmabuf_t;
-
-static void
-do_prod(void *v)
-{
-    static const uint64_t one = 1;
-    drmprime_out_env_t *const dpo = v;
-    write(dpo->prod_fd, &one, sizeof(one));
-}
 
 static void gb2_free(void * v, uint8_t * data)
 {
@@ -155,12 +142,7 @@ int drmprime_out_display(drmprime_out_env_t *de, struct AVFrame *src_frame)
         return AVERROR(EINVAL);
     }
 
-    if (de->prod_wait) {
-        uint64_t buf[1];
-        de->prod_wait = false;
-        read(de->prod_fd, buf, 8);
-    }
-
+    drmu_env_queue_wait(de->du);
     {
         drmu_atomic_t * da = drmu_atomic_new(de->du);
         drmu_fb_t * dfb = is_prime ?
@@ -204,8 +186,6 @@ int drmprime_out_display(drmprime_out_env_t *de, struct AVFrame *src_frame)
 #endif
         drmu_atomic_output_add_props(da, de->dout);
         drmu_atomic_plane_add_fb(da, de->dp, dfb, r);
-        drmu_atomic_add_commit_callback(da, do_prod, de);
-        de->prod_wait = true;
 
         drmu_fb_unref(&dfb);
         drmu_atomic_queue(&da);
@@ -250,17 +230,17 @@ int drmprime_out_modeset(drmprime_out_env_t * de, int w, int h, const AVRational
     return 0;
 }
 
+struct drmu_output_s * drmprime_out_output(const drmprime_out_env_t * const dpo)
+{
+    return dpo->dout;
+}
+
 void drmprime_out_delete(drmprime_out_env_t *de)
 {
-    drmprime_out_runticker_stop(de);
-    drmprime_out_runcube_stop(de);
-
     drmu_pool_unref(&de->pic_pool);
     drmu_plane_unref(&de->dp);
     drmu_output_unref(&de->dout);
     drmu_env_unref(&de->du);
-    if (de->prod_fd != -1)
-        close(de->prod_fd);
     free(de);
 }
 
@@ -286,7 +266,6 @@ drmprime_out_env_t* drmprime_out_new()
         return NULL;
 
     de->mode_id = -1;
-    de->prod_fd = -1;
 
     {
         const drmu_log_env_t log = {
@@ -309,11 +288,6 @@ drmprime_out_env_t* drmprime_out_new()
         goto fail;
 
     drmu_output_max_bpc_allow(de->dout, true);
-
-    if ((de->prod_fd = eventfd(0, 0)) == -1) {
-        fprintf(stderr, "Failed to get event fd\n");
-        goto fail;
-    }
 
     if ((de->pic_pool = drmu_pool_new_dmabuf_video(de->du, 32)) == NULL)
         goto fail;

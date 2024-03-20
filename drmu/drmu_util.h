@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 
-struct drmu_mode_simple_params_s;
+#include "drmu.h"
 
 // Parse a string of the form [<w>x<h>][i][@<hz>[.<mHz>]]
 // Returns pointer to terminating char
@@ -21,6 +21,11 @@ char * drmu_util_parse_mode_simple_params(const char * s, struct drmu_mode_simpl
 char * drmu_util_simple_param_to_mode_str(char * buf, size_t buflen, const drmu_mode_simple_params_t * const p);
 
 #define drmu_util_simple_mode(p) drmu_util_simple_param_to_mode_str((char[64]){0}, 64, (p))
+
+// Given width & height guess par. Spots Likely SD and returns 4:3 otherwise reduced w:h
+drmu_ufrac_t drmu_util_guess_par(const unsigned int w, const unsigned int h);
+// Get a par from simple_params. par can be zero & if so then guess
+drmu_ufrac_t drmu_util_guess_simple_mode_par(const drmu_mode_simple_params_t * const p);
 
 #ifdef __cplusplus
 }
